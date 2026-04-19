@@ -252,7 +252,7 @@ pub struct DisplayBinding {
     pub poll_hz: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum DisplayMode {
     Tuner,

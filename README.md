@@ -121,9 +121,13 @@ cells.
   independently. Hold fires when the press duration crosses a 350 ms
   threshold; momentary on the tap slot honours both press-down and
   release edges.
-- Display cells (`tuner`, `meter`, `value`, `text`) and preset cells
-  (`load-preset`, `open-preset-picker`) parse and validate today; the
-  Phase 2 / 3 runtime will wake them up without a schema migration.
+- Display cells (`tuner`, `meter`, `value`, `text`) read live values
+  pushed from Carla — the deck registers as an OSC client on startup
+  and decodes Carla's `/Carla/param` and `/Carla/peaks` updates into
+  a shared cache the renderer reads each frame. The `tuner` widget
+  converts a frequency parameter into a note + cents readout.
+  Preset cells (`load-preset`, `open-preset-picker`) parse today and
+  the Phase 3 runtime will wake them up without a schema migration.
 - Defaults to Carla's built-in OSC server on `127.0.0.1:22752`;
   override per-config in the `[carla]` block.
 

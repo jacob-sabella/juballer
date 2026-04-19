@@ -140,9 +140,7 @@ param = 1
 mode = "carousel-next"
 values = [2.0, 4.0, 8.0, 12.0, 20.0]
 
-# Display cell — Phase 2 will wake this up. Today it parses, validates,
-# and the renderer paints it with the dimmer "display" palette so you
-# can see the layout you're going to get.
+# Display cell — Phase 2 reads live values pushed from Carla.
 [[page.cell]]
 row = 2
 col = 3
@@ -151,4 +149,22 @@ label = "Gain Reduction"
 mode = "meter"
 plugin = 1
 source_param = 8
+poll_hz = 30
+
+# ─── Page 3 — Tuner widget (gxtuner) ─────────────────────────────
+# Demonstrates a Phase 2 display cell that reads from Carla and
+# renders a tuner widget. Plug a guitar in, set Carla's first slot
+# to gxtuner (LV2: http://guitarix.sourceforge.net/plugins/gxtuner#tuner),
+# and this cell will display the detected note + cents.
+[[page]]
+title = "Tuner"
+
+[[page.cell]]
+row = 0
+col = 0
+label = "Tuner"
+[page.cell.display]
+mode = "tuner"
+plugin = 0
+freq_param = 0
 poll_hz = 30

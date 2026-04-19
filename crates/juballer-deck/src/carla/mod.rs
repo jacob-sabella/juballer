@@ -27,6 +27,7 @@
 
 pub mod config;
 pub mod dispatch;
+pub mod listener;
 pub mod osc;
 pub mod picker;
 pub mod render;
@@ -56,6 +57,8 @@ pub fn run(path: &Path) -> Result<()> {
         .build()
         .map_err(|e| crate::Error::Config(format!("tokio runtime: {e}")))?;
     let client = osc::CarlaClient::spawn(rt.handle(), target)?;
+    let live_listener = listener::spawn(rt.handle(), target).ok();
+    let live_feed = live_listener.as_ref().map(listener::CarlaListener::feed);
 
     let mut state = state::CarlaState::new(cfg);
     let mut press_starts: HashMap<(u8, u8), Instant> = HashMap::new();
@@ -72,6 +75,7 @@ pub fn run(path: &Path) -> Result<()> {
 
     let mut overlay = EguiOverlay::new();
     let exit_client = client.clone();
+    let exit_listener = live_listener.clone();
 
     app.run(move |frame, events| {
         state.tick();
@@ -81,7 +85,7 @@ pub fn run(path: &Path) -> Result<()> {
             render::draw_picker_overlay(frame, &mut overlay, p);
         } else {
             render::paint_backgrounds(frame, &state);
-            render::draw_overlay(frame, &mut overlay, &state);
+            render::draw_overlay(frame, &mut overlay, &state, live_feed.as_ref());
         }
 
         for ev in events {
@@ -108,6 +112,9 @@ pub fn run(path: &Path) -> Result<()> {
                             }
                             picker::PickerAction::Exit => {
                                 exit_client.shutdown();
+                                if let Some(l) = exit_listener.as_ref() {
+                                    l.shutdown();
+                                }
                                 juballer_core::process::exit(0);
                             }
                             picker::PickerAction::Activate(path) => {
@@ -152,10 +159,20 @@ pub fn run(path: &Path) -> Result<()> {
                         }
                         continue;
                     }
-                    on_key_up(*row, *col, &mut press_starts, &mut state, &client);
+                    on_key_up(
+                        *row,
+                        *col,
+                        &mut press_starts,
+                        &mut state,
+                        &client,
+                        live_listener.as_ref(),
+                    );
                 }
                 Event::Quit => {
                     exit_client.shutdown();
+                    if let Some(l) = exit_listener.as_ref() {
+                        l.shutdown();
+                    }
                     juballer_core::process::exit(0);
                 }
                 Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
@@ -165,6 +182,9 @@ pub fn run(path: &Path) -> Result<()> {
                         picker_state = None;
                     } else {
                         exit_client.shutdown();
+                        if let Some(l) = exit_listener.as_ref() {
+                            l.shutdown();
+                        }
                         juballer_core::process::exit(0);
                     }
                 }
@@ -214,6 +234,7 @@ fn on_key_up(
     press_starts: &mut HashMap<(u8, u8), Instant>,
     state: &mut state::CarlaState,
     client: &osc::CarlaClient,
+    live: Option<&listener::CarlaListener>,
 ) {
     let held = press_starts
         .remove(&(row, col))
@@ -221,7 +242,7 @@ fn on_key_up(
         .unwrap_or_default();
 
     if row == render::NAV_ROW {
-        handle_nav(col, state, client);
+        handle_nav(col, state, client, live);
         return;
     }
 
@@ -237,7 +258,12 @@ fn on_key_up(
 /// Bottom-row navigation handler for the active grid. The CONFIGS
 /// press + the picker overlay live in [`run`] because they need to
 /// mutate per-frame state outside `state`.
-fn handle_nav(col: u8, state: &mut state::CarlaState, client: &osc::CarlaClient) {
+fn handle_nav(
+    col: u8,
+    state: &mut state::CarlaState,
+    client: &osc::CarlaClient,
+    live: Option<&listener::CarlaListener>,
+) {
     match col {
         c if c == render::NAV_PREV_COL => {
             state.prev_page();
@@ -247,6 +273,9 @@ fn handle_nav(col: u8, state: &mut state::CarlaState, client: &osc::CarlaClient)
         }
         c if c == render::NAV_EXIT_COL => {
             client.shutdown();
+            if let Some(l) = live {
+                l.shutdown();
+            }
             juballer_core::process::exit(0);
         }
         _ => {}

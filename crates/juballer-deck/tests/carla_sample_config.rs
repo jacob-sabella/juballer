@@ -13,7 +13,7 @@ fn bundled_sample_config_parses_and_validates() {
     let cfg = Configuration::load(&sample_path())
         .expect("examples/carla/sample-config.toml should parse + validate");
     assert_eq!(cfg.display_name(), "Sample Drum Bus FX");
-    assert_eq!(cfg.pages.len(), 2, "sample exercises sub-page nav");
+    assert!(cfg.pages.len() >= 2, "sample exercises sub-page nav");
 }
 
 #[test]
@@ -47,16 +47,22 @@ fn bundled_sample_config_exercises_all_phase_1_action_modes() {
 }
 
 #[test]
-fn bundled_sample_includes_a_display_binding_for_phase_2_validation() {
+fn bundled_sample_includes_meter_and_tuner_display_bindings() {
     let cfg = Configuration::load(&sample_path()).unwrap();
-    let mut found = false;
+    let mut modes = std::collections::HashSet::new();
     for page in &cfg.pages {
         for cell in &page.cells {
             if let Some(disp) = &cell.display {
-                assert_eq!(disp.mode, DisplayMode::Meter);
-                found = true;
+                modes.insert(disp.mode);
             }
         }
     }
-    assert!(found, "sample should include at least one display binding");
+    assert!(
+        modes.contains(&DisplayMode::Meter),
+        "sample should demonstrate the meter display"
+    );
+    assert!(
+        modes.contains(&DisplayMode::Tuner),
+        "sample should demonstrate the tuner display"
+    );
 }
