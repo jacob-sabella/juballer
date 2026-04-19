@@ -1,0 +1,10 @@
+[meta]
+title = "home"
+
+[[button]]
+row = 0
+col = 0
+action = "shell.run"
+args = { cmd = "echo smoke-ok" }
+icon = "▶"
+label = "echo"

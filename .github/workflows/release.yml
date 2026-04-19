@@ -1,0 +1,119 @@
+name: Release
+
+# Tag-triggered release pipeline. Pushing a `v*` tag (e.g. `v0.1.0`)
+# builds release binaries for every supported platform and attaches
+# them to a GitHub Release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            ext: ""
+          - os: windows-latest
+            name: windows-x86_64
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.name }})
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libudev-dev \
+            libasound2-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            mesa-vulkan-drivers \
+            libvulkan-dev
+
+      - name: Build release binary
+        run: cargo build --release -p juballer-deck
+
+      - name: Stage tarball (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          STAGE="dist/juballer-${{ github.ref_name }}-${{ matrix.name }}"
+          mkdir -p "$STAGE"
+          cp target/release/juballer-deck "$STAGE/"
+          cp README.md LICENSE "$STAGE/"
+          cp -r assets "$STAGE/"
+          tar -C dist -czf "juballer-${{ github.ref_name }}-${{ matrix.name }}.tar.gz" \
+            "$(basename "$STAGE")"
+
+      - name: Stage zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "dist/juballer-${{ github.ref_name }}-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/release/juballer-deck${{ matrix.ext }}" $stage
+          Copy-Item README.md, LICENSE $stage
+          Copy-Item -Recurse assets $stage
+          Compress-Archive -Path $stage `
+            -DestinationPath "juballer-${{ github.ref_name }}-${{ matrix.name }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: juballer-${{ github.ref_name }}-${{ matrix.name }}
+          path: |
+            juballer-${{ github.ref_name }}-${{ matrix.name }}.tar.gz
+            juballer-${{ github.ref_name }}-${{ matrix.name }}.zip
+          if-no-files-found: ignore
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## Install
+
+            Download the archive for your platform, extract, and run
+            `juballer-deck`.
+
+            See the [README](https://github.com/jacob-sabella/juballer#install)
+            for build-from-source instructions and the full feature list.

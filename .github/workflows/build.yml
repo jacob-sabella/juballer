@@ -1,0 +1,94 @@
+name: Build
+
+# Nightly artifact build — runs on every push to main and produces
+# downloadable per-platform binaries for `juballer-deck`. Tagged release
+# builds are handled separately by `release.yml`.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            ext: ""
+          - os: windows-latest
+            name: windows-x86_64
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libudev-dev \
+            libasound2-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            mesa-vulkan-drivers \
+            libvulkan-dev
+
+      - name: Build release binary
+        run: cargo build --release -p juballer-deck
+
+      - name: Stage tarball (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          STAGE="dist/juballer-${{ github.sha }}-${{ matrix.name }}"
+          mkdir -p "$STAGE"
+          cp target/release/juballer-deck "$STAGE/"
+          cp README.md LICENSE "$STAGE/"
+          cp -r assets "$STAGE/"
+          tar -C dist -czf "juballer-${{ matrix.name }}.tar.gz" "$(basename "$STAGE")"
+
+      - name: Stage zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "dist/juballer-${{ github.sha }}-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/release/juballer-deck${{ matrix.ext }}" $stage
+          Copy-Item README.md, LICENSE $stage
+          Copy-Item -Recurse assets $stage
+          Compress-Archive -Path $stage -DestinationPath "juballer-${{ matrix.name }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: juballer-${{ matrix.name }}
+          path: |
+            juballer-${{ matrix.name }}.tar.gz
+            juballer-${{ matrix.name }}.zip
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,11 @@
+version = 1
+active_profile = "demo"
+
+[editor]
+bind = "127.0.0.1:7374"
+
+[render]
+bg = "#0b0d12"
+
+[log]
+level = "info"

@@ -1,0 +1,18 @@
+[meta]
+title = "home"
+
+[top]
+kind = "stack"
+dir = "vertical"
+gap = 4
+children = [
+    { size = { ratio = 1.0 }, pane = "home_top_a" },
+    { size = { ratio = 1.0 }, pane = "home_top_b" },
+]
+
+[[button]]
+row = 0
+col = 0
+action = "deck.page_goto"
+args = { page = "media" }
+label = "→media"

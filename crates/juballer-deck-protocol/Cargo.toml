@@ -1,0 +1,16 @@
+[package]
+name = "juballer-deck-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Wire-format types for the juballer-deck plugin protocol (UDS + NDJSON)."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "juballer-gestures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Optional tap/hold/chord/swipe gesture recognizer over juballer-core raw events."
+
+[dependencies]
+juballer-core = { path = "../juballer-core" }
+
+[lints]
+workspace = true

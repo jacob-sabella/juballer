@@ -1,0 +1,17 @@
+# Formatting policy for the workspace. Stable rustfmt only — no nightly
+# options here so `cargo fmt` works on the toolchain pinned in
+# `rust-toolchain.toml`. Anything tightening beyond stable defaults
+# lives behind a comment explaining why it earns its keep.
+
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "Default"
+reorder_imports = true
+reorder_modules = true
+remove_nested_parens = true
+match_block_trailing_comma = false
+use_field_init_shorthand = true
+use_try_shorthand = true

@@ -1,0 +1,17 @@
+# Clippy configuration. Most lint *selection* lives in the workspace
+# `Cargo.toml` under `[workspace.lints.clippy]`; this file holds the
+# tunable knobs that those lints read at evaluation time.
+
+# Public items don't require a `# Errors` / `# Panics` section as long
+# as `clippy::missing_errors_doc` / `missing_panics_doc` aren't enabled
+# at deny level. Cap doc-comment line length to match `comment_width`
+# in `rustfmt.toml`.
+doc-valid-idents = ["WGSL", "GPU", "CPU", "BPM", "FFT", "HUD", "API", "URL", "UV"]
+
+# Allow up to this many lines in a function body before
+# `clippy::too_many_lines` fires.
+too-many-lines-threshold = 200
+
+# `clippy::cognitive_complexity` is noisy on rendering / shader code;
+# raise the bar so it only flags genuinely tangled functions.
+cognitive-complexity-threshold = 30

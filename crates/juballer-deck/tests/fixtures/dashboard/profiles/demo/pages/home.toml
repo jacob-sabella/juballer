@@ -1,0 +1,37 @@
+[meta]
+title = "home"
+
+[top]
+kind = "stack"
+dir = "vertical"
+gap = 8
+children = [
+    { size = { fixed = 40 }, pane = "clock_pane" },
+    { size = { ratio = 1.0 }, pane = "sys_pane" },
+    { size = { ratio = 1.0 }, pane = "log_pane" },
+    { size = { fixed = 70 }, pane = "probe_pane" },
+]
+
+[top_panes.clock_pane]
+widget = "clock"
+
+[top_panes.sys_pane]
+widget = "sysinfo"
+
+[top_panes.log_pane]
+widget = "log_feed"
+topic = "demo.events"
+max_rows = 4
+
+[top_panes.probe_pane]
+widget = "http_probe"
+url = "$FAKE_URL"
+label = "probe"
+interval_ms = 800
+
+[[button]]
+row = 0
+col = 0
+action = "shell.run"
+args = { cmd = "true" }
+label = "nop"

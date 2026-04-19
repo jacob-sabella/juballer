@@ -1,0 +1,182 @@
+# Plugin-owned page shipped by the `discord` plugin. Registered as
+# `discord:overview` at deck startup (see manifest's `pages` array).
+
+[meta]
+title = "Discord"
+logical_rows = 4
+logical_cols = 4
+pinned_rows = [3]
+
+[top]
+kind = "stack"
+dir = "vertical"
+gap = 8
+children = [
+    { size = { fixed = 56 }, pane = "clock" },
+    { size = { ratio = 1.0 }, pane = "discord" },
+    { size = { fixed = 72 }, pane = "toast" },
+]
+
+[top_panes.clock]
+widget = "clock"
+format = "DISCORD  %H:%M:%S"
+
+[top_panes.discord]
+widget = "dynamic"
+tree_key = "discord"
+placeholder = "discord plugin not connected"
+
+[top_panes.toast]
+widget = "notification_toast"
+prefixes = ["action."]
+dismiss_after_ms = 2500
+
+# ROW 0 — navigation to Discord app views.
+# All use `hyprctl dispatch exec '[workspace 2 silent; ...]'` so the Discord
+# window opens on workspace 2 (Samsung monitor), NOT on the deck monitor.
+[[button]]
+row = 0
+col = 0
+action = "shell.run"
+args = { cmd = "hyprctl dispatch exec '[workspace 2 silent] xdg-open discord://discord.com/channels/@me'" }
+icon = "📬"
+label = "DMs"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 0
+col = 1
+action = "shell.run"
+args = { cmd = "hyprctl dispatch exec '[workspace 2 silent] xdg-open discord://discord.com/channels/@me/friends'" }
+icon = "👥"
+label = "friends"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 0
+col = 2
+action = "shell.run"
+args = { cmd = "hyprctl dispatch exec '[workspace 2 silent] xdg-open discord://discord.com/channels/@me/mentions'" }
+icon = "@"
+label = "mentions"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 0
+col = 3
+action = "shell.run"
+args = { cmd = "hyprctl dispatch exec '[workspace 2 silent] xdg-open discord://discord.com/channels/@me/pending'" }
+icon = "⏳"
+label = "pending"
+
+# ROW 1 — voice controls.  Discord's default hotkeys: Ctrl+Shift+M mutes mic,
+# Ctrl+Shift+D deafens. We press them via keypress so Discord picks them up
+# wherever it is focused.
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+[[button]]
+row = 1
+col = 0
+action = "keypress"
+args = { keys = "Control,Shift,m" }
+icon = "🎤"
+label = "mic"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 1
+col = 1
+action = "keypress"
+args = { keys = "Control,Shift,d" }
+icon = "🎧"
+label = "deafen"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 1
+col = 2
+action = "system.mic_mute"
+icon = "🎙"
+label = "sys mic"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 1
+col = 3
+action = "shell.run"
+args = { cmd = "hyprctl dispatch exec '[workspace 2 silent] xdg-open discord://discord.com/channels/@me'" }
+icon = "🟢"
+label = "focus"
+
+# ROW 2 — quick actions
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+[[button]]
+row = 2
+col = 0
+action = "shell.run"
+args = { cmd = "pactl set-source-volume @DEFAULT_SOURCE@ +5% && notify-send 'mic' \"$(pactl get-source-volume @DEFAULT_SOURCE@ | head -1)\"" }
+icon = "🔊"
+label = "mic+"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 2
+col = 1
+action = "shell.run"
+args = { cmd = "pactl set-source-volume @DEFAULT_SOURCE@ -5% && notify-send 'mic' \"$(pactl get-source-volume @DEFAULT_SOURCE@ | head -1)\"" }
+icon = "🔉"
+label = "mic-"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 2
+col = 2
+action = "shell.run"
+args = { cmd = "wpctl set-volume -l 1.0 $(pactl list sink-inputs | awk -v p=discord 'BEGIN{IGNORECASE=1} /^Sink Input/{id=$3} /application.name/ && $0 ~ p {print id; exit}') 5%-" }
+icon = "🔈"
+label = "dsc vol-"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 2
+col = 3
+action = "shell.run"
+args = { cmd = "wpctl set-volume -l 1.0 $(pactl list sink-inputs | awk -v p=discord 'BEGIN{IGNORECASE=1} /^Sink Input/{id=$3} /application.name/ && $0 ~ p {print id; exit}') 5%+" }
+icon = "🔊"
+label = "dsc vol+"
+
+# ROW 3 — PINNED nav
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+[[button]]
+row = 3
+col = 0
+action = "deck.page_goto"
+args = { page = "home" }
+icon = "🏠"
+label = "home"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 3
+col = 1
+action = "deck.page_goto"
+args = { page = "media" }
+icon = "🎵"
+label = "media"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 3
+col = 2
+action = "deck.page_goto"
+args = { page = "gaming" }
+icon = "🏆"
+label = "gaming"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
+
+[[button]]
+row = 3
+col = 3
+action = "deck.page_back"
+icon = "⬅"
+label = "back"
+shader = { wgsl = "/home/jsabella/Projects/juballer/crates/juballer-deck/examples/shaders/kind_glow.wgsl" }
