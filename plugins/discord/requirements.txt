@@ -1,0 +1,6 @@
+# Discord local-IPC client + HTTP for OAuth token exchange.
+pypresence>=4.6
+httpx>=0.27
+
+# The juballer SDK is expected to be installed separately during dev:
+#   pip install -e /path/to/juballer/deck-py-sdk

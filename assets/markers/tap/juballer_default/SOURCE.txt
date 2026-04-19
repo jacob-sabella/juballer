@@ -1,0 +1,2 @@
+Procedurally generated via scripts/generate_markers.sh (ImageMagick).
+Re-run that script to regenerate. No third-party assets.

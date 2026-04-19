@@ -1,0 +1,11 @@
+/target
+/dist
+/.superpowers
+/.claude/worktrees
+**/*.rs.bk
+Cargo.lock.*
+nohup.out
+
+# Local scratch binaries
+/test_cursor
+/test_reborrow

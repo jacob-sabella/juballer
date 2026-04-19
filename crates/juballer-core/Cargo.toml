@@ -1,0 +1,49 @@
+[package]
+name = "juballer-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Foundation library for the GAMO2 FB9 controller: calibrated grid + top-region rendering and input."
+
+[features]
+default = []
+raw-input = ["dep:evdev", "dep:windows"]
+headless = []
+
+[dependencies]
+pollster = "0.4"
+winit.workspace = true
+wgpu.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+crossbeam-channel.workspace = true
+indexmap.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+log.workspace = true
+raw-window-handle.workspace = true
+tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, optional = true }
+
+[dev-dependencies]
+env_logger.workspace = true
+dhat.workspace = true
+criterion.workspace = true
+image.workspace = true
+tempfile = "3"
+
+[[bench]]
+name = "bench_layout"
+harness = false
+
+[lints]
+workspace = true

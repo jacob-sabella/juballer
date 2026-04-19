@@ -1,0 +1,4 @@
+name = "alt"
+description = "Alt profile"
+default_page = "home"
+pages = ["home"]

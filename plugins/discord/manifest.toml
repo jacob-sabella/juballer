@@ -1,0 +1,12 @@
+name = "discord"
+version = "0.1.0"
+entry_point = "main.py"
+language = "python"
+# This plugin doesn't expose actions or named widget classes — it pushes
+# view-trees directly via `widget.view_update` to a `dynamic` widget pane
+# whose `tree_key` is "discord".
+actions = []
+widgets = []
+# Plugin-owned pages live under pages/<name>.toml. The deck registers each
+# as `<plugin>:<name>` — navigate via `deck.page_goto discord:overview`.
+pages = ["overview"]

@@ -1,0 +1,54 @@
+# Sample deck page that wires cells to rhythm-mode entry points via the
+# `rhythm.launch` action. Drop this file under a profile's `pages/`
+# directory and reference it from the profile's page list to use it.
+#
+# Each cell exec()s the current juballer-deck binary with a rhythm
+# subcommand — the deck app is replaced, not forked, so only one window
+# and one HID claim are live at a time.
+
+[meta]
+title = "rhythm launcher"
+
+[[button]]
+row = 0
+col = 3
+action = "rhythm.launch"
+args = { subcommand = "play" }
+label = "Play"
+icon = "♪"
+
+# Tutorial — cell (3, 0). Short scripted onboarding session.
+[[button]]
+row = 3
+col = 0
+action = "rhythm.launch"
+args = { subcommand = "tutorial" }
+label = "Tutorial"
+icon = "?"
+
+# Audio-offset calibration — cell (3, 2).
+[[button]]
+row = 3
+col = 2
+action = "rhythm.launch"
+args = { subcommand = "calibrate-audio" }
+label = "Calibrate"
+icon = "⏱"
+
+# Rhythm settings editor — cell (3, 3).
+[[button]]
+row = 3
+col = 3
+action = "rhythm.launch"
+args = { subcommand = "settings" }
+label = "Settings"
+icon = "⚙"
+
+# Gameplay mods — cell (0, 2). Toggles no-fail etc.
+[[button]]
+row = 0
+col = 2
+action = "rhythm.launch"
+args = { subcommand = "mods" }
+label = "Mods"
+icon = "⚙"

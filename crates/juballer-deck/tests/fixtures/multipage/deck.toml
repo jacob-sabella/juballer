@@ -1,0 +1,11 @@
+version = 1
+active_profile = "demo"
+
+[editor]
+bind = "127.0.0.1:7375"
+enabled = false
+
+[render]
+
+[log]
+level = "info"

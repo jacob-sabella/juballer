@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>juballer-deck editor</title>
+<style>
+  /* Catppuccin Mocha */
+  :root {
+    --base: #1e1e2e;
+    --mantle: #181825;
+    --crust: #11111b;
+    --surface0: #313244;
+    --surface1: #45475a;
+    --surface2: #585b70;
+    --overlay0: #6c7086;
+    --overlay1: #7f849c;
+    --text: #cdd6f4;
+    --subtext1: #bac2de;
+    --subtext0: #a6adc8;
+    --blue: #89b4fa;
+    --lavender: #b4befe;
+    --sapphire: #74c7ec;
+    --mauve: #cba6f7;
+    --pink: #f5c2e7;
+    --red: #f38ba8;
+    --maroon: #eba0ac;
+    --peach: #fab387;
+    --yellow: #f9e2af;
+    --green: #a6e3a1;
+    --teal: #94e2d5;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--base);
+    color: var(--text);
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  button, input, select, textarea {
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--text);
+  }
+  a { color: var(--sapphire); }
+
+  /* Top bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    padding: 10px 16px;
+    flex-shrink: 0;
+  }
+  .topbar h1 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--lavender);
+    font-weight: 600;
+  }
+  .topbar .spacer { flex: 1; }
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface0);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: background .2s; }
+  .live.connected .dot { background: var(--green); }
+  .event-log {
+    flex: 1;
+    max-width: 520px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--subtext0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    gap: 10px;
+  }
+  .event-log .ev { color: var(--subtext1); }
+  .event-log .ev .k { color: var(--mauve); }
+  .btn {
+    background: var(--surface0);
+    border: 1px solid var(--surface1);
+    color: var(--text);
+    padding: 5px 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .btn:hover { background: var(--surface1); }
+  .btn.primary { background: var(--blue); color: var(--crust); border-color: var(--blue); font-weight: 600; }
+  .btn.primary:hover { background: var(--lavender); border-color: var(--lavender); }
+  .btn.danger { background: var(--red); color: var(--crust); border-color: var(--red); font-weight: 600; }
+  .btn.danger:hover { background: var(--maroon); border-color: var(--maroon); }
+  .btn.ghost { background: transparent; }
+  .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+  /* Layout */
+  .shell {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 240px 1fr 380px;
+    min-height: 0;
+  }
+  .col { min-height: 0; overflow-y: auto; }
+  .col.sidebar { background: var(--mantle); border-right: 1px solid var(--surface0); padding: 14px; }
+  .col.center { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+  .col.rightpane { background: var(--mantle); border-left: 1px solid var(--surface0); padding: 16px; }
+
+  .section-title {
+    color: var(--lavender);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin: 14px 0 6px;
+    font-weight: 600;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  .side-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--subtext1);
+  }
+  .side-item:hover { background: var(--surface0); color: var(--text); }
+  .side-item.active { background: var(--surface0); color: var(--blue); font-weight: 500; }
+  .side-item .star { color: var(--yellow); }
+  .side-item .sub { font-size: 10px; color: var(--overlay1); margin-left: auto; }
+
+  /* Grid */
+  .grid-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .grid-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .grid-head h2 { margin: 0; font-size: 16px; color: var(--text); }
+  .grid-head .meta { color: var(--overlay1); font-size: 12px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 10px;
+    aspect-ratio: 1 / 1;
+    max-width: 640px;
+    width: 100%;
+  }
+  .cell {
+    background: var(--surface0);
+    border: 2px solid transparent;
+    border-radius: 8px;
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--subtext1);
+    transition: transform .06s, border-color .15s, background .15s;
+    user-select: none;
+    position: relative;
+  }
+  .cell:hover { background: var(--surface1); }
+  .cell.empty { color: var(--overlay0); font-size: 28px; }
+  .cell.bound .icon { font-size: 28px; line-height: 1; }
+  .cell.bound .label { font-size: 11px; color: var(--text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell.bound .action { font-size: 9px; color: var(--overlay1); font-family: ui-monospace, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell.selected { border-color: var(--blue); background: var(--surface1); }
+  .cell.flash { background: var(--yellow); color: var(--crust); transform: scale(0.96); }
+  .cell .rc { position: absolute; top: 4px; left: 6px; font-size: 9px; color: var(--overlay0); font-family: ui-monospace, monospace; }
+
+  /* Page header bar */
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    border-radius: 6px;
+  }
+  .bar .label { color: var(--overlay1); font-size: 11px; }
+
+  /* Right panel */
+  .rightpane h3 { margin: 0 0 4px; font-size: 14px; color: var(--lavender); }
+  .rightpane .dim { color: var(--overlay1); font-size: 11px; margin-bottom: 12px; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 11px; color: var(--subtext0); margin-bottom: 3px; font-weight: 500; }
+  .field label .req { color: var(--red); margin-left: 2px; }
+  .field label .kind { color: var(--overlay0); font-family: ui-monospace, monospace; font-size: 10px; margin-left: 4px; }
+  .field .desc { color: var(--overlay1); font-size: 10px; margin-top: 2px; }
+  .ctl {
+    width: 100%;
+    background: var(--surface0);
+    border: 1px solid var(--surface1);
+    border-radius: 4px;
+    padding: 6px 8px;
+    outline: none;
+  }
+  .ctl:focus { border-color: var(--blue); }
+  textarea.ctl { min-height: 80px; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+  input[type=checkbox].ctl { width: auto; }
+  .row-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .arr-item {
+    border: 1px solid var(--surface1);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 6px;
+    background: var(--base);
+  }
+  .arr-item .arr-head { display: flex; justify-content: space-between; font-size: 10px; color: var(--overlay1); margin-bottom: 4px; }
+  .arr-add { margin-top: 4px; }
+  .nested {
+    border-left: 2px solid var(--surface1);
+    padding-left: 10px;
+    margin-left: 2px;
+  }
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--surface1);
+    color: var(--text);
+    padding: 10px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--surface2);
+    z-index: 100;
+    font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .toast.err { border-color: var(--red); background: var(--surface0); color: var(--red); }
+  .toast.ok { border-color: var(--green); color: var(--green); }
+
+  /* Combo */
+  .combo { position: relative; }
+  .combo-input { width: 100%; }
+  .combo-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--surface0);
+    border: 1px solid var(--surface1);
+    border-radius: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 10;
+    margin-top: 2px;
+    display: none;
+  }
+  .combo.open .combo-list { display: block; }
+  .combo-opt {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  .combo-opt:hover, .combo-opt.hi { background: var(--surface1); color: var(--blue); }
+
+  .empty-state {
+    color: var(--overlay1);
+    font-size: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+
+  /* Status view */
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .stat-card {
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    border-radius: 6px;
+    padding: 12px;
+  }
+  .stat-card .n { font-size: 22px; font-weight: 600; color: var(--blue); }
+  .stat-card .k { font-size: 11px; color: var(--overlay1); text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
+
+  .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--surface0); margin-bottom: 12px; }
+  .tabbar .tab { padding: 6px 14px; cursor: pointer; font-size: 12px; color: var(--subtext0); border-bottom: 2px solid transparent; }
+  .tabbar .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .menu { position: relative; }
+  .menu-items {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: var(--surface0);
+    border: 1px solid var(--surface1);
+    border-radius: 4px;
+    min-width: 160px;
+    z-index: 20;
+    display: none;
+    margin-top: 4px;
+  }
+  .menu.open .menu-items { display: block; }
+  .menu-item {
+    padding: 7px 12px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .menu-item:hover { background: var(--surface1); }
+  .menu-item.dim { color: var(--overlay1); cursor: default; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>juballer-deck</h1>
+  <div class="tabbar" style="border:none; margin:0;">
+    <div class="tab active" data-view="editor">Editor</div>
+    <div class="tab" data-view="status">Status</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="event-log" id="event-log"></div>
+  <div class="menu" id="plugins-menu">
+    <button class="btn" id="plugins-btn">Plugins ▾</button>
+    <div class="menu-items" id="plugins-items"></div>
+  </div>
+  <span id="livebadge" class="live"><span class="dot"></span><span id="livestate">disconnected</span></span>
+</div>
+
+<div class="shell" id="view-editor">
+  <div class="col sidebar">
+    <div class="section-title">Profiles</div>
+    <div id="profiles-list"></div>
+    <div class="section-title">Pages</div>
+    <div id="pages-list"></div>
+  </div>
+
+  <div class="col center">
+    <div class="bar">
+      <div><span class="label">profile</span> <strong id="cur-profile">—</strong></div>
+      <div><span class="label">page</span> <strong id="cur-page">—</strong></div>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn ghost" id="reload-page">Reload</button>
+    </div>
+    <div class="grid-wrap">
+      <div class="grid-head">
+        <h2>Buttons</h2>
+        <span class="meta">4 × 4 grid · click a cell to bind</span>
+      </div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+
+  <div class="col rightpane" id="rightpane">
+    <div class="empty-state">Select a cell to bind or edit an action.</div>
+  </div>
+</div>
+
+<div id="view-status" style="display:none; padding:24px; overflow:auto; flex:1;">
+  <div class="status-grid" id="status-cards"></div>
+  <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:14px; margin-top:18px;">
+    <div>
+      <div class="section-title">Profiles</div>
+      <div id="status-profiles"></div>
+    </div>
+    <div>
+      <div class="section-title">Actions</div>
+      <div id="status-actions" style="max-height:360px; overflow:auto; font-family:ui-monospace,monospace; font-size:11px;"></div>
+    </div>
+    <div>
+      <div class="section-title">Widgets</div>
+      <div id="status-widgets" style="max-height:360px; overflow:auto; font-family:ui-monospace,monospace; font-size:11px;"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-host"></div>
+
+<script>
+"use strict";
+
+/* -------- State -------- */
+const S = {
+  profiles: [],       // [{name, description, default_page, pages}]
+  activeProfile: null,
+  currentProfile: null,
+  currentPage: null,
+  pageData: null,     // {meta, top, top_panes, button: [...]}
+  selectedRow: null,
+  selectedCol: null,
+  actions: [],
+  widgets: [],
+  plugins: [],        // either [string] or [{name,version,status}]
+  ws: null,
+  schemaCache: new Map(),
+  view: "editor",
+};
+
+/* -------- Utilities -------- */
+const $ = (id) => document.getElementById(id);
+const el = (tag, props, ...kids) => {
+  const n = document.createElement(tag);
+  if (props) for (const k in props) {
+    if (k === "class") n.className = props[k];
+    else if (k === "style") n.setAttribute("style", props[k]);
+    else if (k.startsWith("on") && typeof props[k] === "function") n.addEventListener(k.slice(2), props[k]);
+    else if (k in n) n[k] = props[k];
+    else n.setAttribute(k, props[k]);
+  }
+  for (const k of kids.flat()) {
+    if (k == null) continue;
+    n.appendChild(typeof k === "string" ? document.createTextNode(k) : k);
+  }
+  return n;
+};
+
+function toast(msg, kind = "") {
+  const host = $("toast-host");
+  const t = el("div", { class: "toast " + kind }, msg);
+  host.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+async function apiGet(path) {
+  const r = await fetch(path);
+  if (!r.ok) { const e = new Error(`${r.status} ${r.statusText}`); e.status = r.status; throw e; }
+  return r.json();
+}
+async function apiJson(path, method, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body == null ? "{}" : JSON.stringify(body),
+  });
+  if (!r.ok) { const e = new Error(`${r.status} ${r.statusText}`); e.status = r.status; throw e; }
+  const text = await r.text();
+  return text ? JSON.parse(text) : {};
+}
+
+/* -------- Initial load -------- */
+async function bootstrap() {
+  try {
+    const state = await apiGet("/api/v1/state");
+    S.activeProfile = state.active_profile;
+
+    const [profiles, actions, widgets, plugins] = await Promise.all([
+      apiGet("/api/v1/profiles").catch(() => []),
+      apiGet("/api/v1/actions").catch(() => []),
+      apiGet("/api/v1/widgets").catch(() => []),
+      apiGet("/api/v1/plugins").catch(() => []),
+    ]);
+    S.profiles = profiles;
+    S.actions = (actions || []).slice().sort();
+    S.widgets = (widgets || []).slice().sort();
+    S.plugins = plugins || [];
+
+    renderProfiles();
+    renderPlugins();
+    renderStatusView();
+
+    // default selection: active profile, its default page
+    const active = S.profiles.find((p) => p.name === S.activeProfile) || S.profiles[0];
+    if (active) {
+      await selectProfile(active.name, false);
+      const defPage = active.default_page || (active.pages && active.pages[0]);
+      if (defPage) await selectPage(defPage);
+    }
+  } catch (e) {
+    toast("Failed to load state: " + e.message, "err");
+  }
+}
+
+/* -------- Sidebar -------- */
+function renderProfiles() {
+  const host = $("profiles-list");
+  host.innerHTML = "";
+  for (const p of S.profiles) {
+    const isActive = p.name === S.activeProfile;
+    const isCurrent = p.name === S.currentProfile;
+    const item = el("div", { class: "side-item" + (isCurrent ? " active" : "") },
+      el("span", null, isActive ? "★ " : "  "),
+      el("span", null, p.name),
+      el("span", { class: "sub" }, (p.pages || []).length + "pg"),
+    );
+    item.addEventListener("click", async () => {
+      if (!isActive) {
+        try { await apiJson(`/api/v1/profiles/${encodeURIComponent(p.name)}/activate`, "POST"); S.activeProfile = p.name; toast(`Activated ${p.name}`, "ok"); } catch (e) { toast("Activate failed: " + e.message, "err"); }
+      }
+      await selectProfile(p.name, true);
+    });
+    host.appendChild(item);
+  }
+}
+
+function renderPages() {
+  const host = $("pages-list");
+  host.innerHTML = "";
+  const prof = S.profiles.find((p) => p.name === S.currentProfile);
+  if (!prof) return;
+  for (const pg of prof.pages || []) {
+    const isCurrent = pg === S.currentPage;
+    const item = el("div", { class: "side-item" + (isCurrent ? " active" : "") },
+      el("span", null, pg),
+      prof.default_page === pg ? el("span", { class: "sub" }, "default") : null,
+    );
+    item.addEventListener("click", () => selectPage(pg));
+    host.appendChild(item);
+  }
+}
+
+async function selectProfile(name, loadPage) {
+  S.currentProfile = name;
+  renderProfiles();
+  renderPages();
+  $("cur-profile").textContent = name;
+  if (loadPage) {
+    const prof = S.profiles.find((p) => p.name === name);
+    const first = prof && (prof.default_page || (prof.pages && prof.pages[0]));
+    if (first) await selectPage(first);
+  }
+}
+
+async function selectPage(page) {
+  S.currentPage = page;
+  S.selectedRow = null;
+  S.selectedCol = null;
+  renderPages();
+  $("cur-page").textContent = page;
+  renderRightPane();
+  await loadPage();
+}
+
+/* -------- Page load -------- */
+async function loadPage() {
+  const prof = S.currentProfile;
+  const page = S.currentPage;
+  if (!prof || !page) return;
+  try {
+    S.pageData = await apiGet(`/api/v1/profiles/${encodeURIComponent(prof)}/pages/${encodeURIComponent(page)}`);
+  } catch (e) {
+    if (e.status === 404) {
+      // endpoint not yet implemented: fall back to the profile response and pluck the page
+      try {
+        const full = await apiGet(`/api/v1/profiles/${encodeURIComponent(prof)}`);
+        const pg = full.pages && full.pages[page];
+        if (!pg) throw new Error("page not found in profile payload");
+        S.pageData = pg;
+        toast("Editor endpoint missing — read-only fallback active", "err");
+      } catch (ee) {
+        S.pageData = { meta: {}, top: null, top_panes: null, button: [] };
+        toast("Failed to load page: " + ee.message, "err");
+      }
+    } else {
+      S.pageData = { meta: {}, top: null, top_panes: null, button: [] };
+      toast("Failed to load page: " + e.message, "err");
+    }
+  }
+  if (!Array.isArray(S.pageData.button)) S.pageData.button = [];
+  renderGrid();
+}
+
+/* -------- Grid -------- */
+function findButton(row, col) {
+  if (!S.pageData) return null;
+  return S.pageData.button.find((b) => b.row === row && b.col === col) || null;
+}
+
+function renderGrid() {
+  const host = $("grid");
+  host.innerHTML = "";
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      const b = findButton(r, c);
+      const isSel = S.selectedRow === r && S.selectedCol === c;
+      const cell = el("div", { class: "cell " + (b ? "bound" : "empty") + (isSel ? " selected" : "") });
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+      cell.appendChild(el("span", { class: "rc" }, `${r},${c}`));
+      if (b) {
+        cell.appendChild(el("span", { class: "icon" }, b.icon || "·"));
+        cell.appendChild(el("span", { class: "label" }, b.label || "(no label)"));
+        cell.appendChild(el("span", { class: "action" }, b.action || ""));
+      } else {
+        cell.appendChild(el("span", null, "+"));
+      }
+      cell.addEventListener("click", () => selectCell(r, c));
+      host.appendChild(cell);
+    }
+  }
+}
+
+function flashCell(row, col) {
+  const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+  if (!cell) return;
+  cell.classList.add("flash");
+  setTimeout(() => cell.classList.remove("flash"), 200);
+}
+
+function selectCell(r, c) {
+  S.selectedRow = r;
+  S.selectedCol = c;
+  renderGrid();
+  renderRightPane();
+}
+
+/* -------- Right panel (cell editor) -------- */
+let formState = null; // working copy of { action, args, icon, label }
+
+function renderRightPane() {
+  const host = $("rightpane");
+  host.innerHTML = "";
+  if (S.selectedRow == null) {
+    host.appendChild(el("div", { class: "empty-state" }, "Select a cell to bind or edit an action."));
+    return;
+  }
+  const r = S.selectedRow, c = S.selectedCol;
+  const existing = findButton(r, c);
+  formState = existing ? JSON.parse(JSON.stringify(existing)) : { row: r, col: c, action: "", args: {}, icon: "", label: "" };
+  if (formState.args == null) formState.args = {};
+
+  host.appendChild(el("h3", null, `Cell ${r},${c}`));
+  host.appendChild(el("div", { class: "dim" }, existing ? "Editing existing binding" : "No binding yet"));
+
+  // Action picker
+  host.appendChild(buildActionCombo());
+
+  // Schema form host
+  const schemaHost = el("div", { id: "schema-host" });
+  host.appendChild(schemaHost);
+
+  // Icon + label
+  host.appendChild(el("div", { class: "field" },
+    el("label", null, "Icon ", el("span", { class: "kind" }, "(emoji or path)")),
+    el("input", {
+      class: "ctl",
+      type: "text",
+      value: formState.icon || "",
+      placeholder: "🚀",
+      oninput: (e) => { formState.icon = e.target.value; },
+    }),
+  ));
+  host.appendChild(el("div", { class: "field" },
+    el("label", null, "Label"),
+    el("input", {
+      class: "ctl",
+      type: "text",
+      value: formState.label || "",
+      placeholder: "name this button",
+      oninput: (e) => { formState.label = e.target.value; },
+    }),
+  ));
+
+  // Buttons
+  const actionsRow = el("div", { class: "row-actions" },
+    el("button", { class: "btn primary", onclick: onSaveBinding }, "Save"),
+    el("button", { class: "btn", onclick: onTestAction }, "Test"),
+    existing ? el("button", { class: "btn danger", onclick: onRemoveBinding }, "Remove binding") : null,
+  );
+  host.appendChild(actionsRow);
+
+  // Load schema for the initial action (if any)
+  if (formState.action) loadAndRenderSchema(formState.action);
+  else schemaHost.appendChild(el("div", { class: "dim" }, "Pick an action to configure its arguments."));
+}
+
+/* Searchable combobox for actions */
+function buildActionCombo() {
+  const wrap = el("div", { class: "field" },
+    el("label", null, "Action ", el("span", { class: "req" }, "*")),
+  );
+  const combo = el("div", { class: "combo" });
+  const input = el("input", {
+    class: "ctl combo-input",
+    type: "text",
+    placeholder: "search actions…",
+    value: formState.action || "",
+  });
+  const list = el("div", { class: "combo-list" });
+  combo.appendChild(input);
+  combo.appendChild(list);
+
+  const render = () => {
+    const q = input.value.toLowerCase();
+    list.innerHTML = "";
+    for (const a of S.actions) {
+      if (q && !a.toLowerCase().includes(q)) continue;
+      const o = el("div", { class: "combo-opt" }, a);
+      o.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        input.value = a;
+        formState.action = a;
+        formState.args = formState.args || {};
+        combo.classList.remove("open");
+        loadAndRenderSchema(a);
+      });
+      list.appendChild(o);
+    }
+  };
+
+  input.addEventListener("focus", () => { render(); combo.classList.add("open"); });
+  input.addEventListener("input", () => { render(); combo.classList.add("open"); });
+  input.addEventListener("blur", () => setTimeout(() => combo.classList.remove("open"), 120));
+  input.addEventListener("change", () => { formState.action = input.value; });
+
+  wrap.appendChild(combo);
+  return wrap;
+}
+
+/* -------- Schema → Form -------- */
+async function loadAndRenderSchema(actionName) {
+  const host = $("schema-host");
+  if (!host) return;
+  host.innerHTML = "";
+  host.appendChild(el("div", { class: "dim" }, `Loading schema for ${actionName}…`));
+
+  let schema = S.schemaCache.get(actionName);
+  if (!schema) {
+    try {
+      schema = await apiGet(`/api/v1/actions/${encodeURIComponent(actionName)}/schema`);
+      S.schemaCache.set(actionName, schema);
+    } catch (e) {
+      schema = { type: "object", properties: {} };
+      if (e.status !== 404) toast("Schema fetch failed: " + e.message, "err");
+    }
+  }
+
+  host.innerHTML = "";
+  host.appendChild(renderSchema(schema, formState.args, (next) => { formState.args = next; }));
+}
+
+function isEmptySchema(schema) {
+  return schema
+    && (schema.type === "object" || !schema.type)
+    && schema.properties
+    && Object.keys(schema.properties).length === 0;
+}
+
+function renderSchema(schema, value, onChange) {
+  const container = el("div");
+  if (isEmptySchema(schema)) {
+    // Raw JSON fallback
+    const ta = el("textarea", {
+      class: "ctl",
+      placeholder: '{}',
+      value: JSON.stringify(value || {}, null, 2),
+    });
+    ta.addEventListener("input", () => {
+      try {
+        const v = ta.value.trim() ? JSON.parse(ta.value) : {};
+        onChange(v);
+        ta.style.borderColor = "";
+      } catch (e) {
+        ta.style.borderColor = "var(--red)";
+      }
+    });
+    container.appendChild(el("div", { class: "field" },
+      el("label", null, "Args ", el("span", { class: "kind" }, "(raw JSON — no schema)")),
+      ta,
+    ));
+    return container;
+  }
+
+  if (schema.type === "object" || schema.properties) {
+    return renderObject(schema, value || {}, onChange);
+  }
+  return container;
+}
+
+function renderObject(schema, value, onChange) {
+  const wrap = el("div");
+  const props = schema.properties || {};
+  const required = new Set(schema.required || []);
+  const current = { ...(value || {}) };
+
+  const setProp = (key, v) => {
+    current[key] = v;
+    onChange({ ...current });
+  };
+
+  for (const key of Object.keys(props)) {
+    const p = props[key];
+    wrap.appendChild(renderField(key, p, current[key], required.has(key), (v) => setProp(key, v)));
+  }
+  return wrap;
+}
+
+function renderField(key, schema, value, required, onChange) {
+  const title = schema.title || key;
+  const desc = schema.description || "";
+  let effectiveValue = value;
+  if (effectiveValue === undefined && schema.default !== undefined) {
+    effectiveValue = schema.default;
+    onChange(schema.default);
+  }
+
+  const labelEl = el("label", null,
+    title,
+    required ? el("span", { class: "req" }, "*") : null,
+    el("span", { class: "kind" }, schema.type ? `(${schema.type})` : ""),
+    desc ? (() => { const l = document.createElement("span"); l.title = desc; l.textContent = " ⓘ"; l.style.color = "var(--overlay0)"; l.style.cursor = "help"; return l; })() : null,
+  );
+
+  const wrap = el("div", { class: "field" }, labelEl);
+
+  // enum → select
+  if (schema.enum) {
+    const sel = el("select", { class: "ctl" },
+      ...schema.enum.map((v) => {
+        const o = el("option", null, String(v));
+        o.value = String(v);
+        if (String(effectiveValue) === String(v)) o.selected = true;
+        return o;
+      }),
+    );
+    sel.addEventListener("change", () => {
+      let v = sel.value;
+      if (schema.type === "number" || schema.type === "integer") v = Number(v);
+      else if (schema.type === "boolean") v = v === "true";
+      onChange(v);
+    });
+    wrap.appendChild(sel);
+    if (desc) wrap.appendChild(el("div", { class: "desc" }, desc));
+    return wrap;
+  }
+
+  const type = schema.type || inferType(effectiveValue);
+
+  if (type === "boolean") {
+    const cb = el("input", { class: "ctl", type: "checkbox" });
+    cb.checked = !!effectiveValue;
+    cb.addEventListener("change", () => onChange(cb.checked));
+    wrap.appendChild(cb);
+  } else if (type === "number" || type === "integer") {
+    const inp = el("input", { class: "ctl", type: "number", value: effectiveValue ?? "" });
+    if (type === "integer") inp.step = "1";
+    else if (schema.multipleOf) inp.step = String(schema.multipleOf);
+    if (schema.minimum !== undefined) inp.min = schema.minimum;
+    if (schema.maximum !== undefined) inp.max = schema.maximum;
+    inp.addEventListener("input", () => {
+      const v = inp.value === "" ? undefined : Number(inp.value);
+      onChange(v);
+    });
+    wrap.appendChild(inp);
+  } else if (type === "array") {
+    wrap.appendChild(renderArray(schema, Array.isArray(effectiveValue) ? effectiveValue : [], onChange));
+  } else if (type === "object") {
+    const nest = el("div", { class: "nested" });
+    nest.appendChild(renderObject(schema, effectiveValue || {}, onChange));
+    wrap.appendChild(nest);
+  } else {
+    // string (default)
+    const multiline = schema.format === "textarea" || (schema.maxLength && schema.maxLength > 120);
+    const inp = multiline
+      ? el("textarea", { class: "ctl", value: effectiveValue ?? "" })
+      : el("input", { class: "ctl", type: "text", value: effectiveValue ?? "" });
+    if (schema.placeholder) inp.placeholder = schema.placeholder;
+    inp.addEventListener("input", () => onChange(inp.value));
+    wrap.appendChild(inp);
+  }
+
+  if (desc) wrap.appendChild(el("div", { class: "desc" }, desc));
+  return wrap;
+}
+
+function renderArray(schema, value, onChange) {
+  const itemSchema = schema.items || { type: "string" };
+  const arr = Array.isArray(value) ? value.slice() : [];
+  const wrap = el("div");
+
+  const redraw = () => {
+    wrap.innerHTML = "";
+    arr.forEach((item, idx) => {
+      const row = el("div", { class: "arr-item" });
+      row.appendChild(el("div", { class: "arr-head" },
+        el("span", null, `item ${idx}`),
+        el("button", { class: "btn ghost", style: "padding:2px 8px;font-size:11px;color:var(--red);border-color:transparent", onclick: () => { arr.splice(idx, 1); onChange(arr.slice()); redraw(); } }, "remove"),
+      ));
+      row.appendChild(renderField("", itemSchema, item, false, (v) => { arr[idx] = v; onChange(arr.slice()); }));
+      wrap.appendChild(row);
+    });
+    wrap.appendChild(el("button", {
+      class: "btn arr-add",
+      onclick: () => {
+        arr.push(defaultFor(itemSchema));
+        onChange(arr.slice());
+        redraw();
+      },
+    }, "+ add item"));
+  };
+  redraw();
+  return wrap;
+}
+
+function inferType(v) {
+  if (v == null) return "string";
+  if (typeof v === "boolean") return "boolean";
+  if (typeof v === "number") return "number";
+  if (Array.isArray(v)) return "array";
+  if (typeof v === "object") return "object";
+  return "string";
+}
+
+function defaultFor(schema) {
+  if (schema.default !== undefined) return schema.default;
+  switch (schema.type) {
+    case "boolean": return false;
+    case "number": case "integer": return 0;
+    case "array": return [];
+    case "object": return {};
+    default: return "";
+  }
+}
+
+/* -------- Save / Test / Remove -------- */
+function cleanArgs(a) {
+  if (a == null) return {};
+  if (typeof a !== "object") return a;
+  if (Array.isArray(a)) return a.map(cleanArgs);
+  const out = {};
+  for (const k in a) {
+    const v = a[k];
+    if (v === undefined) continue;
+    if (v === "" ) continue;  // drop empty strings; TOML doesn't benefit from them
+    out[k] = cleanArgs(v);
+  }
+  return out;
+}
+
+async function onSaveBinding() {
+  if (!formState.action) { toast("Pick an action first", "err"); return; }
+  const r = S.selectedRow, c = S.selectedCol;
+  const btn = { row: r, col: c, action: formState.action, args: cleanArgs(formState.args), icon: formState.icon || "", label: formState.label || "" };
+  const buttons = S.pageData.button.filter((b) => !(b.row === r && b.col === c));
+  buttons.push(btn);
+  const body = { ...S.pageData, button: buttons };
+  await postPage(body, "Saved");
+}
+
+async function onRemoveBinding() {
+  const r = S.selectedRow, c = S.selectedCol;
+  const buttons = S.pageData.button.filter((b) => !(b.row === r && b.col === c));
+  const body = { ...S.pageData, button: buttons };
+  await postPage(body, "Removed");
+}
+
+async function postPage(body, okMsg) {
+  const prof = S.currentProfile, page = S.currentPage;
+  try {
+    await apiJson(`/api/v1/profiles/${encodeURIComponent(prof)}/pages/${encodeURIComponent(page)}`, "POST", body);
+    S.pageData = body;
+    toast(okMsg, "ok");
+    renderGrid();
+    renderRightPane();
+  } catch (e) {
+    toast("Save failed: " + e.message + (e.status === 404 ? " (endpoint not yet implemented)" : ""), "err");
+  }
+}
+
+function onTestAction() {
+  if (!S.ws || S.ws.readyState !== 1) { toast("WS not connected", "err"); return; }
+  const payload = { kind: "preview_action", action: formState.action, args: cleanArgs(formState.args) };
+  try { S.ws.send(JSON.stringify(payload)); toast("Test sent", "ok"); }
+  catch (e) { toast("Test failed: " + e.message, "err"); }
+}
+
+/* -------- Plugins menu -------- */
+function renderPlugins() {
+  const items = $("plugins-items");
+  items.innerHTML = "";
+  if (!S.plugins.length) {
+    items.appendChild(el("div", { class: "menu-item dim" }, "no plugins"));
+    return;
+  }
+  for (const p of S.plugins) {
+    const name = typeof p === "string" ? p : p.name;
+    const status = typeof p === "object" && p.status ? p.status : "";
+    const label = status ? `${name}  (${status})` : name;
+    const it = el("div", { class: "menu-item" }, `restart ${label}`);
+    it.addEventListener("click", async () => {
+      try {
+        await apiJson(`/api/v1/plugins/${encodeURIComponent(name)}/restart`, "POST");
+        toast(`Restarted ${name}`, "ok");
+      } catch (e) {
+        toast(`Restart ${name} failed: ${e.message}`, "err");
+      }
+      $("plugins-menu").classList.remove("open");
+    });
+    items.appendChild(it);
+  }
+}
+
+$("plugins-btn").addEventListener("click", () => $("plugins-menu").classList.toggle("open"));
+document.addEventListener("click", (e) => {
+  const m = $("plugins-menu");
+  if (m && !m.contains(e.target)) m.classList.remove("open");
+});
+
+/* -------- Status view -------- */
+function renderStatusView() {
+  const cards = $("status-cards");
+  cards.innerHTML = "";
+  const stats = [
+    { k: "active profile", n: S.activeProfile || "—" },
+    { k: "profiles", n: S.profiles.length },
+    { k: "actions", n: S.actions.length },
+    { k: "widgets", n: S.widgets.length },
+    { k: "plugins", n: S.plugins.length },
+  ];
+  for (const s of stats) {
+    cards.appendChild(el("div", { class: "stat-card" },
+      el("div", { class: "n" }, String(s.n)),
+      el("div", { class: "k" }, s.k),
+    ));
+  }
+
+  const pf = $("status-profiles");
+  pf.innerHTML = "";
+  for (const p of S.profiles) {
+    pf.appendChild(el("div", { class: "side-item" },
+      el("span", null, p.name === S.activeProfile ? "★ " : "  "),
+      el("span", null, p.name),
+      el("span", { class: "sub" }, (p.pages || []).length + "pg"),
+    ));
+  }
+
+  $("status-actions").innerHTML = S.actions.map((a) => `<div>${a}</div>`).join("");
+  $("status-widgets").innerHTML = S.widgets.map((w) => `<div>${w}</div>`).join("");
+}
+
+/* -------- View switch -------- */
+document.querySelectorAll(".tabbar .tab").forEach((t) => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tabbar .tab").forEach((x) => x.classList.remove("active"));
+    t.classList.add("active");
+    const v = t.dataset.view;
+    S.view = v;
+    $("view-editor").style.display = v === "editor" ? "" : "none";
+    $("view-status").style.display = v === "status" ? "" : "none";
+    if (v === "status") renderStatusView();
+  });
+});
+
+/* -------- Event log (last 5) -------- */
+const eventLog = [];
+function pushEvent(ev) {
+  const ts = new Date().toLocaleTimeString();
+  const kind = ev.kind || ev.type || "?";
+  const rest = { ...ev };
+  delete rest.kind; delete rest.type;
+  const summary = Object.keys(rest).length ? JSON.stringify(rest) : "";
+  eventLog.unshift({ ts, kind, summary });
+  while (eventLog.length > 5) eventLog.pop();
+  const host = $("event-log");
+  host.innerHTML = "";
+  for (const e of eventLog) {
+    const span = el("span", { class: "ev" }, `${e.ts} `, el("span", { class: "k" }, e.kind), ` ${e.summary}`);
+    host.appendChild(span);
+  }
+}
+
+/* -------- WebSocket -------- */
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  S.ws = ws;
+  const badge = $("livebadge");
+  const stateEl = $("livestate");
+  ws.onopen = () => { badge.classList.add("connected"); stateEl.textContent = "live"; };
+  ws.onclose = () => {
+    badge.classList.remove("connected");
+    stateEl.textContent = "reconnecting…";
+    S.ws = null;
+    setTimeout(connectWS, 2000);
+  };
+  ws.onerror = () => {};
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    pushEvent(msg);
+    // Handle both the locked `kind` shape and the existing server `type` shape
+    const kind = msg.kind || msg.type;
+    if (kind === "key_preview") {
+      flashCell(msg.row, msg.col);
+    } else if (kind === "profile_reloaded") {
+      // reload if the reloaded profile is the one we're viewing
+      const name = msg.profile || msg.name;
+      if (name === S.currentProfile) loadPage();
+    } else if (kind === "plugin_status") {
+      // update plugins list if shape supports it
+      if (Array.isArray(S.plugins)) {
+        let i = -1;
+        for (let k = 0; k < S.plugins.length; k++) {
+          const p = S.plugins[k];
+          const n = typeof p === "string" ? p : p.name;
+          if (n === msg.name) { i = k; break; }
+        }
+        if (i >= 0 && typeof S.plugins[i] === "object") S.plugins[i].status = msg.status;
+        renderPlugins();
+      }
+    }
+  };
+}
+
+$("reload-page").addEventListener("click", () => loadPage());
+
+/* -------- Kickoff -------- */
+bootstrap();
+connectWS();
+</script>
+</body>
+</html>

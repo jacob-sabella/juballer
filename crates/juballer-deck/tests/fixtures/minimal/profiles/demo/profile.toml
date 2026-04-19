@@ -1,0 +1,4 @@
+name = "demo"
+description = "Plan A smoke"
+default_page = "home"
+pages = ["home"]

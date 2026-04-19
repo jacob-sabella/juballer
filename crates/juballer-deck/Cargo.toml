@@ -1,0 +1,80 @@
+[features]
+default = ["raw-input"]
+raw-input = ["juballer-core/raw-input"]
+headless = ["juballer-core/headless"]
+
+[package]
+name = "juballer-deck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Stream-Deck-style application built on juballer-core."
+
+[dependencies]
+juballer-core = { path = "../juballer-core" }
+juballer-egui = { path = "../juballer-egui" }
+juballer-deck-protocol = { path = "../juballer-deck-protocol" }
+egui.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+hex = "0.4"
+
+egui_extras = { version = "0.30", features = ["image"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+base64.workspace = true
+
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+serde.workspace = true
+toml.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+tokio.workspace = true
+notify.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Daily-rolling file appender for the persistent log file. Pairs with
+# our own startup-time prune so total disk usage stays bounded.
+tracing-appender = "0.2"
+log.workspace = true
+arboard.workspace = true
+enigo.workspace = true
+axum = { workspace = true, features = ["ws"] }
+tower.workspace = true
+tower-http.workspace = true
+interprocess.workspace = true
+tokio-util.workspace = true
+futures-util = { version = "0.3", features = ["sink"] }
+tempfile = "3"
+rand = "0.8"
+# Rhythm mode audio. Default features would pull in symphonia for mp3/aac/etc. which
+# adds ~40 crates; Phase 1 only supports ogg/vorbis sample charts so we trim the
+# transitive graph by picking features explicitly.
+rodio = { version = "0.19", default-features = false, features = ["vorbis", "wav"] }
+# Real-audio FFT for shader backgrounds. `realfft` wraps rustfft with a
+# half-spectrum output optimised for real input (half the buffer, same math).
+realfft = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+v4l = "0.14"
+jpeg-decoder = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = "0.24"
+
+[[bin]]
+name = "juballer-deck"
+path = "src/main.rs"
+
+[lints]
+workspace = true

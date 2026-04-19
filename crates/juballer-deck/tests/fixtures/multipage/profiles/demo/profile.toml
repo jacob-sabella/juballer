@@ -1,0 +1,4 @@
+name = "demo"
+description = "Bus dispatch fixture"
+default_page = "home"
+pages = ["home", "media", "settings"]

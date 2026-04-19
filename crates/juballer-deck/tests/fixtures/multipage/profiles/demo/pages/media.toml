@@ -1,0 +1,16 @@
+[meta]
+title = "media"
+
+[top]
+kind = "stack"
+dir = "horizontal"
+gap = 4
+children = [
+    { size = { ratio = 1.0 }, pane = "media_top_x" },
+]
+
+[[button]]
+row = 0
+col = 0
+action = "deck.page_back"
+label = "back"
