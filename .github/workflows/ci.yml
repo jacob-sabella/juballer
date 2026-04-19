@@ -65,7 +65,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Tests run on Linux only. The Windows runner segfaults during
+      # test teardown when audio / GPU device probes fire on the headless
+      # CI host (rodio + wgpu both need real backends). Windows still
+      # gets fmt + clippy + build coverage so the code stays cross-
+      # platform; the test-suite gate is Linux's job.
       - name: Tests
+        if: runner.os == 'Linux'
         run: cargo test --workspace --lib
 
       - name: Build
