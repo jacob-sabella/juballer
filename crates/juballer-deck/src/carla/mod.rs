@@ -14,22 +14,29 @@
 //! cell (3,2) = CONFIGS     cell (3,3) = EXIT
 //! ```
 //!
-//! ## Phasing
+//! ## Cell modes shipped
 //!
-//! Phase 1 (this revision) implements **input cells only** — `bump-up`,
-//! `bump-down`, `toggle`, `momentary`, `set`, `carousel-next`,
-//! `carousel-prev`. Display cells (`tuner`, `meter`, `value`, `text`,
-//! `active-preset-name`) and preset cells (`load-preset`,
-//! `open-preset-picker`) are parsed and validated so configurations
-//! written today survive the upgrade to Phase 2 / 3, but their
-//! behavior is currently a no-op (`load-preset` logs an info line so
-//! the operator can confirm the binding fired).
+//! - **Input** (Phase 1): `bump-up`, `bump-down`, `toggle`,
+//!   `momentary`, `set`, `carousel-next`, `carousel-prev`. Each cell
+//!   slot (`tap` / `hold`) can carry one independently.
+//! - **Display** (Phase 2): `tuner`, `meter`, `value`, `text`. Read
+//!   live values pushed from Carla via [`listener`].
+//! - **Presets** (Phase 3): `load-preset` applies a named snapshot
+//!   from the preset library; `open-preset-picker` swaps in a
+//!   paginated overlay scoped to a category and applies the chosen
+//!   preset to the cell's bound plugin on tile press.
+//!
+//! The `active-preset-name` display mode parses today but is still a
+//! no-op — wiring it requires tracking the most recently applied
+//! preset per plugin, which Phase 4 will add.
 
 pub mod config;
 pub mod dispatch;
 pub mod listener;
 pub mod osc;
 pub mod picker;
+pub mod preset;
+pub mod preset_picker;
 pub mod render;
 pub mod state;
 
@@ -63,7 +70,24 @@ pub fn run(path: &Path) -> Result<()> {
     let mut state = state::CarlaState::new(cfg);
     let mut press_starts: HashMap<(u8, u8), Instant> = HashMap::new();
     let configs_dir = config::default_configs_dir();
+    let presets_dir = preset::default_root();
+    let presets = preset::PresetLibrary::from_root(&presets_dir);
+    if presets.is_empty() {
+        tracing::info!(
+            target: "juballer::carla",
+            "preset library at {} is empty (load-preset cells will no-op)",
+            presets_dir.display()
+        );
+    } else {
+        tracing::info!(
+            target: "juballer::carla",
+            "loaded {} preset(s) from {}",
+            presets.len(),
+            presets_dir.display()
+        );
+    }
     let mut picker_state: Option<picker::PickerState> = None;
+    let mut preset_picker_state: Option<preset_picker::PresetPickerState> = None;
 
     let mut app = App::builder()
         .title("juballer — carla")
@@ -79,7 +103,11 @@ pub fn run(path: &Path) -> Result<()> {
 
     app.run(move |frame, events| {
         state.tick();
-        if let Some(p) = picker_state.as_mut() {
+        if let Some(pp) = preset_picker_state.as_mut() {
+            pp.tick();
+            render::paint_preset_picker(frame, pp);
+            render::draw_preset_picker_overlay(frame, &mut overlay, pp);
+        } else if let Some(p) = picker_state.as_mut() {
             p.tick();
             render::paint_picker(frame, p);
             render::draw_picker_overlay(frame, &mut overlay, p);
@@ -91,14 +119,61 @@ pub fn run(path: &Path) -> Result<()> {
         for ev in events {
             match ev {
                 Event::KeyDown { row, col, .. } => {
-                    if picker_state.is_some() {
-                        // Picker is press-on-release; ignore key-down so a
+                    if picker_state.is_some() || preset_picker_state.is_some() {
+                        // Pickers fire on release; ignore key-down so a
                         // bumped finger doesn't activate the cell underneath.
                         continue;
                     }
-                    on_key_down(*row, *col, &mut press_starts, &mut state, &client);
+                    on_key_down(
+                        *row,
+                        *col,
+                        &mut press_starts,
+                        &mut state,
+                        &client,
+                        &presets,
+                        &mut preset_picker_state,
+                    );
                 }
                 Event::KeyUp { row, col, .. } => {
+                    if let Some(pp) = preset_picker_state.as_mut() {
+                        match preset_picker::classify_press(pp, *row, *col) {
+                            preset_picker::PresetPickerAction::PagePrev => {
+                                pp.prev_page();
+                            }
+                            preset_picker::PresetPickerAction::PageNext => {
+                                pp.next_page();
+                            }
+                            preset_picker::PresetPickerAction::Back => {
+                                preset_picker_state = None;
+                            }
+                            preset_picker::PresetPickerAction::Exit => {
+                                exit_client.shutdown();
+                                if let Some(l) = exit_listener.as_ref() {
+                                    l.shutdown();
+                                }
+                                juballer_core::process::exit(0);
+                            }
+                            preset_picker::PresetPickerAction::Apply { preset_name, .. } => {
+                                let target = pp.target_plugin();
+                                if let Some(entry) = presets.get(&preset_name) {
+                                    if let Err(e) = preset::apply(&client, entry, target) {
+                                        tracing::warn!(
+                                            target: "juballer::carla",
+                                            "apply preset {preset_name:?}: {e}"
+                                        );
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        target: "juballer::carla",
+                                        "preset {preset_name:?} disappeared from library before apply"
+                                    );
+                                }
+                                preset_picker_state = None;
+                            }
+                            preset_picker::PresetPickerAction::None => {}
+                        }
+                        continue;
+                    }
                     if let Some(p) = picker_state.as_mut() {
                         match picker::classify_press(p, *row, *col) {
                             picker::PickerAction::PagePrev => {
@@ -166,6 +241,8 @@ pub fn run(path: &Path) -> Result<()> {
                         &mut state,
                         &client,
                         live_listener.as_ref(),
+                        &presets,
+                        &mut preset_picker_state,
                     );
                 }
                 Event::Quit => {
@@ -176,9 +253,9 @@ pub fn run(path: &Path) -> Result<()> {
                     juballer_core::process::exit(0);
                 }
                 Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
-                    if picker_state.is_some() {
-                        // Escape inside the picker drops back to the
-                        // active grid rather than exiting the mode.
+                    if preset_picker_state.is_some() {
+                        preset_picker_state = None;
+                    } else if picker_state.is_some() {
                         picker_state = None;
                     } else {
                         exit_client.shutdown();
@@ -214,6 +291,8 @@ fn on_key_down(
     press_starts: &mut HashMap<(u8, u8), Instant>,
     state: &mut state::CarlaState,
     client: &osc::CarlaClient,
+    presets: &preset::PresetLibrary,
+    preset_picker_state: &mut Option<preset_picker::PresetPickerState>,
 ) {
     press_starts.insert((row, col), Instant::now());
     if row == render::NAV_ROW {
@@ -224,10 +303,11 @@ fn on_key_down(
     };
     let outcomes = dispatch::dispatch(&cell, CellEvent::KeyDown, state.cache_mut());
     for outcome in outcomes {
-        handle_outcome(outcome, client, state);
+        handle_outcome(outcome, client, state, presets, preset_picker_state);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_key_up(
     row: u8,
     col: u8,
@@ -235,6 +315,8 @@ fn on_key_up(
     state: &mut state::CarlaState,
     client: &osc::CarlaClient,
     live: Option<&listener::CarlaListener>,
+    presets: &preset::PresetLibrary,
+    preset_picker_state: &mut Option<preset_picker::PresetPickerState>,
 ) {
     let held = press_starts
         .remove(&(row, col))
@@ -251,7 +333,7 @@ fn on_key_up(
     };
     let outcomes = dispatch::dispatch(&cell, CellEvent::KeyUp { held }, state.cache_mut());
     for outcome in outcomes {
-        handle_outcome(outcome, client, state);
+        handle_outcome(outcome, client, state, presets, preset_picker_state);
     }
 }
 
@@ -291,7 +373,13 @@ fn lookup_cell(state: &state::CarlaState, row: u8, col: u8) -> Option<config::Ce
         .cloned()
 }
 
-fn handle_outcome(outcome: Outcome, client: &osc::CarlaClient, state: &mut state::CarlaState) {
+fn handle_outcome(
+    outcome: Outcome,
+    client: &osc::CarlaClient,
+    state: &mut state::CarlaState,
+    presets: &preset::PresetLibrary,
+    preset_picker_state: &mut Option<preset_picker::PresetPickerState>,
+) {
     match outcome {
         Outcome::SetParameter {
             plugin,
@@ -302,16 +390,43 @@ fn handle_outcome(outcome: Outcome, client: &osc::CarlaClient, state: &mut state
             state.set_last_touched(plugin, param, value);
         }
         Outcome::LoadPreset { plugin, preset } => {
-            tracing::info!(
-                target: "juballer::carla",
-                "load-preset {preset:?} for plugin {plugin:?} — Phase 3 stub"
-            );
+            let plugin_idx = match plugin {
+                config::PluginRef::Index(i) => Some(i),
+                config::PluginRef::Name(_) => None,
+            };
+            match presets.get(&preset) {
+                Some(entry) => {
+                    if let Err(e) = crate::carla::preset::apply(client, entry, plugin_idx) {
+                        tracing::warn!(
+                            target: "juballer::carla",
+                            "apply preset {preset:?}: {e}"
+                        );
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        target: "juballer::carla",
+                        "load-preset {preset:?} not found in library"
+                    );
+                }
+            }
         }
-        Outcome::OpenPresetPicker { category } => {
-            tracing::info!(
-                target: "juballer::carla",
-                "open-preset-picker category={category:?} — Phase 3 stub"
-            );
+        Outcome::OpenPresetPicker { plugin, category } => {
+            let target = match plugin {
+                config::PluginRef::Index(i) => Some(i),
+                config::PluginRef::Name(_) => None,
+            };
+            if presets.is_empty() {
+                tracing::info!(
+                    target: "juballer::carla",
+                    "open-preset-picker: library is empty (no presets at \
+                     ~/.config/juballer/carla/presets/)"
+                );
+            } else {
+                *preset_picker_state = Some(preset_picker::PresetPickerState::new_from_library(
+                    presets, category, target,
+                ));
+            }
         }
     }
 }

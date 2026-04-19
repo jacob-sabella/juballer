@@ -168,3 +168,37 @@ mode = "tuner"
 plugin = 0
 freq_param = 0
 poll_hz = 30
+
+# ─── Page 4 — Cab presets (Phase 3) ───────────────────────────────
+# Phase 3 cells: pressing them looks the named preset up in
+# `~/.config/juballer/carla/presets/<category>/*.preset.toml` and
+# applies it to the configured plugin slot.
+[[page]]
+title = "Cabs"
+
+[[page.cell]]
+row = 0
+col = 0
+label = "Marshall"
+[page.cell.tap]
+plugin = 0     # whichever slot hosts CabXr
+mode = "load-preset"
+preset = "Vintage Marshall 4x12"
+
+[[page.cell]]
+row = 0
+col = 1
+label = "Mesa"
+[page.cell.tap]
+plugin = 0
+mode = "load-preset"
+preset = "Modern Mesa 4x12"
+
+[[page.cell]]
+row = 1
+col = 0
+label = "Pick cab"
+[page.cell.tap]
+plugin = 0
+mode = "open-preset-picker"
+category = "cabs"

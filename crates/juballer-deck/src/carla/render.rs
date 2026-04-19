@@ -12,6 +12,8 @@ use crate::carla::picker::{
     NAV_NEXT_COL as PICKER_NAV_NEXT_COL, NAV_PREV_COL as PICKER_NAV_PREV_COL,
     NAV_ROW as PICKER_NAV_ROW, TILES_PER_PAGE,
 };
+use crate::carla::preset::PresetEntry;
+use crate::carla::preset_picker::PresetPickerState;
 use crate::carla::state::CarlaState;
 use juballer_core::{Color, Frame};
 use juballer_egui::EguiOverlay;
@@ -448,6 +450,94 @@ pub fn paint_picker(frame: &mut Frame<'_>, picker: &PickerState) {
     frame
         .grid_cell(PICKER_NAV_ROW, PICKER_NAV_EXIT_COL)
         .fill(PALETTE_NAV_EXIT);
+}
+
+/// Preset picker background. Same layout as the config picker but
+/// with a distinct amber tile palette so the two overlays are
+/// visually distinguishable.
+pub fn paint_preset_picker(frame: &mut Frame<'_>, picker: &PresetPickerState) {
+    for r in 0..4u8 {
+        for c in 0..4u8 {
+            frame.grid_cell(r, c).fill(PALETTE_PICKER_EMPTY);
+        }
+    }
+    let entries = picker.current_entries();
+    for (i, _entry) in entries.iter().enumerate().take(TILES_PER_PAGE) {
+        let r = (i / 4) as u8;
+        let c = (i % 4) as u8;
+        frame.grid_cell(r, c).fill(PALETTE_PRESET);
+    }
+    let multi_page = picker.page_count() > 1;
+    let nav = if multi_page {
+        PALETTE_NAV_ACTIVE
+    } else {
+        PALETTE_NAV_DISABLED
+    };
+    frame
+        .grid_cell(PICKER_NAV_ROW, PICKER_NAV_PREV_COL)
+        .fill(nav);
+    frame
+        .grid_cell(PICKER_NAV_ROW, PICKER_NAV_NEXT_COL)
+        .fill(nav);
+    frame
+        .grid_cell(PICKER_NAV_ROW, NAV_BACK_COL)
+        .fill(PALETTE_NAV_ACTIVE);
+    frame
+        .grid_cell(PICKER_NAV_ROW, PICKER_NAV_EXIT_COL)
+        .fill(PALETTE_NAV_EXIT);
+}
+
+/// Preset picker overlay labels + top-region HUD.
+pub fn draw_preset_picker_overlay(
+    frame: &mut Frame<'_>,
+    overlay: &mut EguiOverlay,
+    picker: &PresetPickerState,
+) {
+    let cell_rects = *frame.cell_rects();
+    let top_rect = frame.top_region_rect();
+    let header = match picker.category() {
+        Some(cat) => format!(
+            "presets · {cat}    page {}/{}    {} total    ← target {}",
+            picker.current_page_index() + 1,
+            picker.page_count(),
+            picker.total(),
+            picker
+                .target_plugin()
+                .map(|p| format!("plugin #{p}"))
+                .unwrap_or_else(|| "no plugin".into())
+        ),
+        None => format!(
+            "presets    page {}/{}    {} total    ← target {}",
+            picker.current_page_index() + 1,
+            picker.page_count(),
+            picker.total(),
+            picker
+                .target_plugin()
+                .map(|p| format!("plugin #{p}"))
+                .unwrap_or_else(|| "no plugin".into())
+        ),
+    };
+    let entries: Vec<PresetEntry> = picker.current_entries().to_vec();
+
+    overlay.draw(frame, |rc| {
+        draw_top_hud(rc.ctx(), top_rect, &header, 0, 0, "", None, None);
+        for (i, entry) in entries.iter().enumerate().take(TILES_PER_PAGE) {
+            let rect = cell_rects[i];
+            let label = match &entry.preset.description {
+                Some(desc) if !desc.is_empty() => format!("{}\n{desc}", entry.name()),
+                _ => entry.name(),
+            };
+            draw_cell_label(rc.ctx(), rect, &label);
+        }
+        let prev_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + PICKER_NAV_PREV_COL as usize];
+        let next_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + PICKER_NAV_NEXT_COL as usize];
+        let back_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + NAV_BACK_COL as usize];
+        let exit_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + PICKER_NAV_EXIT_COL as usize];
+        draw_cell_label(rc.ctx(), prev_rect, "◀ PAGE");
+        draw_cell_label(rc.ctx(), next_rect, "PAGE ▶");
+        draw_cell_label(rc.ctx(), back_rect, "BACK");
+        draw_cell_label(rc.ctx(), exit_rect, "EXIT");
+    });
 }
 
 /// Picker overlay labels. One tile per visible config (name + optional

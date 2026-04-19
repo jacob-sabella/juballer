@@ -1,0 +1,42 @@
+# Example preset for an LV2 cab simulator.
+#
+# This preset writes a parameter snapshot to whichever Carla slot the
+# binding's `load-preset` cell targets. Apply with a TOML cell like:
+#
+#   [page.cell.tap]
+#   plugin = 0          # carla slot index
+#   mode = "load-preset"
+#   preset = "Vintage Marshall 4x12"
+#
+# Only the [[param]] entries with `name = <int>` are dispatched today
+# (Phase 1 plugin/param resolution is index-only). The [[file]] entries
+# go via /Carla/<plugin>/set_custom_data; CabXr-style IR loaders read
+# them from a custom-data key the plugin documents.
+
+name = "Vintage Marshall 4x12"
+description = "Classic British 4x12, mids forward, scooped highs"
+target_plugin = "CabXr"
+
+[[param]]
+name = 0       # MIX
+value = 0.85
+
+[[param]]
+name = 1       # LEVEL
+value = 0.7
+
+[[param]]
+name = 2       # LOW
+value = 0.45
+
+[[param]]
+name = 3       # MID
+value = 0.65
+
+[[param]]
+name = 4       # HIGH
+value = 0.4
+
+[[file]]
+key = "ir_file"
+path = "/srv/ir/marshall-1960a-vintage.wav"

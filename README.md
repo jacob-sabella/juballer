@@ -126,8 +126,12 @@ cells.
   and decodes Carla's `/Carla/param` and `/Carla/peaks` updates into
   a shared cache the renderer reads each frame. The `tuner` widget
   converts a frequency parameter into a note + cents readout.
-  Preset cells (`load-preset`, `open-preset-picker`) parse today and
-  the Phase 3 runtime will wake them up without a schema migration.
+- Preset library at `~/.config/juballer/carla/presets/<category>/<name>.preset.toml`.
+  `load-preset` cells apply a named snapshot directly; `open-preset-picker`
+  cells open a paginated picker overlay scoped to a category, where
+  pressing a tile applies the preset to the cell's bound plugin slot.
+  See `crates/juballer-deck/examples/carla/presets/cabs/` for two
+  example cab-sim presets.
 - Defaults to Carla's built-in OSC server on `127.0.0.1:22752`;
   override per-config in the `[carla]` block.
 

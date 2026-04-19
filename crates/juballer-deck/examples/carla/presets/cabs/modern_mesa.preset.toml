@@ -1,0 +1,29 @@
+# Modern Mesa 4x12 — tighter low end, smoother top.
+
+name = "Modern Mesa 4x12"
+description = "Tighter lows than the Marshall, more low-mid focus"
+target_plugin = "CabXr"
+
+[[param]]
+name = 0       # MIX
+value = 0.9
+
+[[param]]
+name = 1       # LEVEL
+value = 0.65
+
+[[param]]
+name = 2       # LOW
+value = 0.6
+
+[[param]]
+name = 3       # MID
+value = 0.55
+
+[[param]]
+name = 4       # HIGH
+value = 0.5
+
+[[file]]
+key = "ir_file"
+path = "/srv/ir/mesa-recto-4x12.wav"

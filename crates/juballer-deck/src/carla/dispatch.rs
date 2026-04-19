@@ -50,9 +50,12 @@ pub enum Outcome {
     },
     /// Phase 3 — apply a saved preset to a plugin.
     LoadPreset { plugin: PluginRef, preset: String },
-    /// Phase 3 — open the preset picker overlay, optionally filtered
-    /// to a category.
-    OpenPresetPicker { category: Option<String> },
+    /// Phase 3 — open the preset picker overlay scoped to one
+    /// plugin slot, optionally filtered to a category.
+    OpenPresetPicker {
+        plugin: PluginRef,
+        category: Option<String>,
+    },
 }
 
 /// Top-level dispatch. Walks the cell's tap/hold slots and emits the
@@ -210,6 +213,7 @@ fn fire_action(
         }
         ActionMode::OpenPresetPicker => {
             out.push(Outcome::OpenPresetPicker {
+                plugin: action.plugin.clone(),
                 category: action.category.clone(),
             });
         }
@@ -520,6 +524,7 @@ mod tests {
         assert_eq!(
             out[0],
             Outcome::OpenPresetPicker {
+                plugin: PluginRef::Index(0),
                 category: Some("guitar-cabs".into()),
             }
         );
