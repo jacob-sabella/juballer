@@ -45,7 +45,6 @@ use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -139,6 +138,30 @@ impl JacketCache {
             self.inner.insert(path.to_path_buf(), loaded);
         }
         self.inner.get(path).and_then(|o| o.as_ref())
+    }
+}
+
+/// Re-exec the current process into `cmd`. On Unix this calls
+/// `CommandExt::exec` (the picker process is replaced). On Windows
+/// there is no in-place exec, so we spawn the child, wait for it, and
+/// exit with its status code.
+fn relaunch_or_exit(mut cmd: std::process::Command, err_label: &str) -> ! {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = cmd.exec();
+        tracing::error!(target: "juballer::rhythm::picker", "{err_label}: {err}");
+        std::process::exit(1);
+    }
+    #[cfg(not(unix))]
+    {
+        match cmd.status() {
+            Ok(status) => std::process::exit(status.code().unwrap_or(0)),
+            Err(err) => {
+                tracing::error!(target: "juballer::rhythm::picker", "{err_label}: {err}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
@@ -1190,12 +1213,7 @@ pub fn pick(
                             if let Some(v) = exec_sfx_volume {
                                 cmd.arg("--sfx-volume").arg(format!("{v}"));
                             }
-                            let err = cmd.exec();
-                            tracing::error!(
-                                target: "juballer::rhythm::picker",
-                                "exec failed: {err}"
-                            );
-                            std::process::exit(1);
+                            relaunch_or_exit(cmd, "exec failed");
                         }
                     }
                 }
@@ -1324,12 +1342,7 @@ pub fn pick(
                                     if let Some(v) = exec_sfx_volume {
                                         cmd.arg("--sfx-volume").arg(format!("{v}"));
                                     }
-                                    let err = cmd.exec();
-                                    tracing::error!(
-                                        target: "juballer::rhythm::picker",
-                                        "exec failed: {err}"
-                                    );
-                                    std::process::exit(1);
+                                    relaunch_or_exit(cmd, "exec failed");
                                 }
                             }
                         }

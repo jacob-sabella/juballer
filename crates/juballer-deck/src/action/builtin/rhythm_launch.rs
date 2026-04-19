@@ -21,7 +21,6 @@
 
 use crate::action::{Action, ActionCx, BuildFromArgs};
 use crate::{Error, Result};
-use std::os::unix::process::CommandExt;
 
 #[derive(Debug)]
 pub struct RhythmLaunch {
@@ -118,11 +117,32 @@ impl Action for RhythmLaunch {
         // Tell the child that when it graceful-exits, it should re-exec
         // the deck binary (no args → DeckApp) so the user lands back in
         // the deck surface they launched from. Honoured by rhythm::exit.
-        let err = std::process::Command::new(&exe)
-            .args(&argv)
-            .env("JUBALLER_RETURN_TO", "deck")
-            .exec();
-        bus.publish(topic, serde_json::json!({ "error": err.to_string() }));
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.args(&argv).env("JUBALLER_RETURN_TO", "deck");
+        let err = relaunch_or_spawn(cmd);
+        bus.publish(topic, serde_json::json!({ "error": err }));
+    }
+}
+
+/// Relaunch the deck binary into the rhythm subcommand. On Unix this
+/// `exec`s in place — the only way it returns is if the exec itself
+/// failed, in which case we surface the error string. On Windows we
+/// spawn the child and return immediately; if spawn fails we surface
+/// the error.
+fn relaunch_or_spawn(mut cmd: std::process::Command) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.exec().to_string()
+    }
+    #[cfg(not(unix))]
+    {
+        match cmd.spawn() {
+            Ok(_) => {
+                std::process::exit(0);
+            }
+            Err(e) => e.to_string(),
+        }
     }
 }
 
