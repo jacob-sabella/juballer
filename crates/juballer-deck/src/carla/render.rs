@@ -6,6 +6,11 @@
 //! (parameter-value bars, display widgets, animation).
 
 use crate::carla::config::{ActionMode, Cell, DisplayMode, PluginRef};
+use crate::carla::picker::{
+    self, PickerState, NAV_BACK_COL, NAV_EXIT_COL as PICKER_NAV_EXIT_COL,
+    NAV_NEXT_COL as PICKER_NAV_NEXT_COL, NAV_PREV_COL as PICKER_NAV_PREV_COL,
+    NAV_ROW as PICKER_NAV_ROW, TILES_PER_PAGE,
+};
 use crate::carla::state::CarlaState;
 use juballer_core::{Color, Frame};
 use juballer_egui::EguiOverlay;
@@ -26,6 +31,8 @@ const PALETTE_PRESET: Color = Color(0x36, 0x28, 0x10, 0xff);
 const PALETTE_NAV_ACTIVE: Color = Color(0x18, 0x1f, 0x2c, 0xff);
 const PALETTE_NAV_DISABLED: Color = Color(0x0a, 0x0a, 0x10, 0xff);
 const PALETTE_NAV_EXIT: Color = Color(0x40, 0x10, 0x14, 0xff);
+const PALETTE_PICKER_TILE: Color = Color(0x16, 0x1f, 0x2e, 0xff);
+const PALETTE_PICKER_EMPTY: Color = Color(0x06, 0x08, 0x0d, 0xff);
 
 /// Paint flat-colour backgrounds for every cell on the active page +
 /// the four bottom-row nav cells. Called every frame from
@@ -153,6 +160,74 @@ pub fn draw_overlay(frame: &mut Frame<'_>, overlay: &mut EguiOverlay, state: &Ca
         draw_cell_label(rc.ctx(), prev_rect, "◀ PAGE");
         draw_cell_label(rc.ctx(), next_rect, "PAGE ▶");
         draw_cell_label(rc.ctx(), pick_rect, "CONFIGS");
+        draw_cell_label(rc.ctx(), exit_rect, "EXIT");
+    });
+}
+
+/// Picker overlay backgrounds. Tiles 0..=11 use a uniform tone; row
+/// 3 carries the picker's own nav layout (PREV / NEXT / BACK / EXIT).
+pub fn paint_picker(frame: &mut Frame<'_>, picker: &PickerState) {
+    for r in 0..4u8 {
+        for c in 0..4u8 {
+            frame.grid_cell(r, c).fill(PALETTE_PICKER_EMPTY);
+        }
+    }
+    let entries = picker.current_entries();
+    for (i, _entry) in entries.iter().enumerate().take(TILES_PER_PAGE) {
+        let r = (i / 4) as u8;
+        let c = (i % 4) as u8;
+        frame.grid_cell(r, c).fill(PALETTE_PICKER_TILE);
+    }
+    let multi_page = picker.page_count() > 1;
+    let nav = if multi_page {
+        PALETTE_NAV_ACTIVE
+    } else {
+        PALETTE_NAV_DISABLED
+    };
+    frame
+        .grid_cell(PICKER_NAV_ROW, PICKER_NAV_PREV_COL)
+        .fill(nav);
+    frame
+        .grid_cell(PICKER_NAV_ROW, PICKER_NAV_NEXT_COL)
+        .fill(nav);
+    frame
+        .grid_cell(PICKER_NAV_ROW, NAV_BACK_COL)
+        .fill(PALETTE_NAV_ACTIVE);
+    frame
+        .grid_cell(PICKER_NAV_ROW, PICKER_NAV_EXIT_COL)
+        .fill(PALETTE_NAV_EXIT);
+}
+
+/// Picker overlay labels. One tile per visible config (name + optional
+/// description), plus the bottom-row nav glyphs.
+pub fn draw_picker_overlay(frame: &mut Frame<'_>, overlay: &mut EguiOverlay, picker: &PickerState) {
+    let cell_rects = *frame.cell_rects();
+    let top_rect = frame.top_region_rect();
+    let header = format!(
+        "configs    page {}/{}    {} total",
+        picker.current_page_index() + 1,
+        picker.page_count(),
+        picker.total(),
+    );
+    let entries: Vec<picker::ConfigEntry> = picker.current_entries().to_vec();
+
+    overlay.draw(frame, |rc| {
+        draw_top_hud(rc.ctx(), top_rect, &header, 0, 0, "", None);
+        for (i, entry) in entries.iter().enumerate().take(TILES_PER_PAGE) {
+            let rect = cell_rects[i];
+            let label = match &entry.description {
+                Some(desc) if !desc.is_empty() => format!("{}\n{}", entry.name, desc),
+                _ => entry.name.clone(),
+            };
+            draw_cell_label(rc.ctx(), rect, &label);
+        }
+        let prev_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + PICKER_NAV_PREV_COL as usize];
+        let next_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + PICKER_NAV_NEXT_COL as usize];
+        let back_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + NAV_BACK_COL as usize];
+        let exit_rect = cell_rects[PICKER_NAV_ROW as usize * 4 + PICKER_NAV_EXIT_COL as usize];
+        draw_cell_label(rc.ctx(), prev_rect, "◀ PAGE");
+        draw_cell_label(rc.ctx(), next_rect, "PAGE ▶");
+        draw_cell_label(rc.ctx(), back_rect, "BACK");
         draw_cell_label(rc.ctx(), exit_rect, "EXIT");
     });
 }

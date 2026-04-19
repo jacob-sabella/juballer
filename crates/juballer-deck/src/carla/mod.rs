@@ -28,6 +28,7 @@
 pub mod config;
 pub mod dispatch;
 pub mod osc;
+pub mod picker;
 pub mod render;
 pub mod state;
 
@@ -58,6 +59,8 @@ pub fn run(path: &Path) -> Result<()> {
 
     let mut state = state::CarlaState::new(cfg);
     let mut press_starts: HashMap<(u8, u8), Instant> = HashMap::new();
+    let configs_dir = config::default_configs_dir();
+    let mut picker_state: Option<picker::PickerState> = None;
 
     let mut app = App::builder()
         .title("juballer — carla")
@@ -72,15 +75,83 @@ pub fn run(path: &Path) -> Result<()> {
 
     app.run(move |frame, events| {
         state.tick();
-        render::paint_backgrounds(frame, &state);
-        render::draw_overlay(frame, &mut overlay, &state);
+        if let Some(p) = picker_state.as_mut() {
+            p.tick();
+            render::paint_picker(frame, p);
+            render::draw_picker_overlay(frame, &mut overlay, p);
+        } else {
+            render::paint_backgrounds(frame, &state);
+            render::draw_overlay(frame, &mut overlay, &state);
+        }
 
         for ev in events {
             match ev {
                 Event::KeyDown { row, col, .. } => {
+                    if picker_state.is_some() {
+                        // Picker is press-on-release; ignore key-down so a
+                        // bumped finger doesn't activate the cell underneath.
+                        continue;
+                    }
                     on_key_down(*row, *col, &mut press_starts, &mut state, &client);
                 }
                 Event::KeyUp { row, col, .. } => {
+                    if let Some(p) = picker_state.as_mut() {
+                        match picker::classify_press(p, *row, *col) {
+                            picker::PickerAction::PagePrev => {
+                                p.prev_page();
+                            }
+                            picker::PickerAction::PageNext => {
+                                p.next_page();
+                            }
+                            picker::PickerAction::Back => {
+                                picker_state = None;
+                            }
+                            picker::PickerAction::Exit => {
+                                exit_client.shutdown();
+                                juballer_core::process::exit(0);
+                            }
+                            picker::PickerAction::Activate(path) => {
+                                match config::Configuration::load(&path) {
+                                    Ok(new_cfg) => {
+                                        state = state::CarlaState::new(new_cfg);
+                                        press_starts.clear();
+                                        picker_state = None;
+                                        tracing::info!(
+                                            target: "juballer::carla",
+                                            "activated {}",
+                                            path.display()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            target: "juballer::carla",
+                                            "failed to load {}: {e}",
+                                            path.display()
+                                        );
+                                    }
+                                }
+                            }
+                            picker::PickerAction::None => {}
+                        }
+                        continue;
+                    }
+                    if *row == render::NAV_ROW && *col == render::NAV_PICKER_COL {
+                        // Clear any stale press state before swapping screens
+                        // so a bottom-row finger doesn't carry into picker
+                        // event handling on the next frame.
+                        press_starts.clear();
+                        let entries = picker::scan(&configs_dir);
+                        if entries.is_empty() {
+                            tracing::info!(
+                                target: "juballer::carla",
+                                "no configs found under {}",
+                                configs_dir.display()
+                            );
+                        } else {
+                            picker_state = Some(picker::PickerState::new(entries));
+                        }
+                        continue;
+                    }
                     on_key_up(*row, *col, &mut press_starts, &mut state, &client);
                 }
                 Event::Quit => {
@@ -88,8 +159,14 @@ pub fn run(path: &Path) -> Result<()> {
                     juballer_core::process::exit(0);
                 }
                 Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
-                    exit_client.shutdown();
-                    juballer_core::process::exit(0);
+                    if picker_state.is_some() {
+                        // Escape inside the picker drops back to the
+                        // active grid rather than exiting the mode.
+                        picker_state = None;
+                    } else {
+                        exit_client.shutdown();
+                        juballer_core::process::exit(0);
+                    }
                 }
                 _ => {}
             }
@@ -157,8 +234,9 @@ fn on_key_up(
     }
 }
 
-/// Bottom-row navigation handler. Phase 1: prev / next walk the
-/// paginator, picker logs a placeholder, exit re-execs into the deck.
+/// Bottom-row navigation handler for the active grid. The CONFIGS
+/// press + the picker overlay live in [`run`] because they need to
+/// mutate per-frame state outside `state`.
 fn handle_nav(col: u8, state: &mut state::CarlaState, client: &osc::CarlaClient) {
     match col {
         c if c == render::NAV_PREV_COL => {
@@ -166,12 +244,6 @@ fn handle_nav(col: u8, state: &mut state::CarlaState, client: &osc::CarlaClient)
         }
         c if c == render::NAV_NEXT_COL => {
             state.next_page();
-        }
-        c if c == render::NAV_PICKER_COL => {
-            tracing::info!(
-                target: "juballer::carla",
-                "config picker overlay not implemented in Phase 1"
-            );
         }
         c if c == render::NAV_EXIT_COL => {
             client.shutdown();
