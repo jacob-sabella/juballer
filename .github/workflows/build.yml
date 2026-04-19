@@ -84,7 +84,7 @@ jobs:
           Compress-Archive -Path $stage -DestinationPath "juballer-${{ matrix.name }}.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: juballer-${{ matrix.name }}
           path: |
