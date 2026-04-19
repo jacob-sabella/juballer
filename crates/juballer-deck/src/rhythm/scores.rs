@@ -130,7 +130,7 @@ impl ScoreBook {
         let key = make_key(chart_path, difficulty);
         let list = self.entries.entry(key).or_default();
         list.push(record);
-        list.sort_by(|a, b| b.score.cmp(&a.score));
+        list.sort_by_key(|e| std::cmp::Reverse(e.score));
         if list.len() > TOP_N {
             list.truncate(TOP_N);
         }

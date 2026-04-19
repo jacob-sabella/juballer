@@ -567,11 +567,8 @@ fn play_chart_inner<H: NarrationHook + 'static>(
                 Event::Quit => {
                     want_exit = true;
                 }
-                Event::Unmapped { key, .. } => {
-                    // Escape leaves rhythm mode cleanly.
-                    if key.0 == "NAMED_Escape" {
-                        want_exit = true;
-                    }
+                Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
+                    want_exit = true;
                 }
                 _ => {}
             }
