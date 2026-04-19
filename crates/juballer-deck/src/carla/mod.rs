@@ -25,3 +25,4 @@
 //! but their behavior is currently a no-op.
 
 pub mod config;
+pub mod osc;
