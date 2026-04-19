@@ -13,6 +13,7 @@
 //! The `picker` arm sets `JUBALLER_RETURN_TO=deck` for the child so the picker's own EXIT
 //! still goes home; `picker` is a one-shot re-entry, not a sticky mode.
 
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
 pub const RETURN_ENV: &str = "JUBALLER_RETURN_TO";
@@ -21,27 +22,32 @@ pub const RETURN_ENV: &str = "JUBALLER_RETURN_TO";
 /// - `deck`   → re-exec into `DeckApp` (no args)
 /// - `picker` → re-exec `play` (no chart arg, opens chart-select picker)
 /// - anything else / unset → `std::process::exit(code)`
+///
+/// The re-exec path is Unix-only (relies on `CommandExt::exec`). On
+/// Windows there is no in-place exec, so the helper falls through to
+/// `process::exit` and the caller is expected to relaunch externally.
 pub fn exit(code: i32) -> ! {
-    let target = std::env::var(RETURN_ENV).ok();
-    if let Some(t) = target.as_deref() {
-        match t {
-            "deck" => {
-                std::env::remove_var(RETURN_ENV);
-                if let Ok(exe) = std::env::current_exe() {
-                    let err = std::process::Command::new(&exe).exec();
-                    eprintln!("return-to-deck exec failed: {err}");
+    #[cfg(unix)]
+    {
+        let target = std::env::var(RETURN_ENV).ok();
+        if let Some(t) = target.as_deref() {
+            match t {
+                "deck" => {
+                    std::env::remove_var(RETURN_ENV);
+                    if let Ok(exe) = std::env::current_exe() {
+                        let err = std::process::Command::new(&exe).exec();
+                        eprintln!("return-to-deck exec failed: {err}");
+                    }
                 }
-            }
-            "picker" => {
-                // Restore the deck-return semantics for the new picker
-                // process so its own EXIT cell still goes home.
-                std::env::set_var(RETURN_ENV, "deck");
-                if let Ok(exe) = std::env::current_exe() {
-                    let err = std::process::Command::new(&exe).arg("play").exec();
-                    eprintln!("return-to-picker exec failed: {err}");
+                "picker" => {
+                    std::env::set_var(RETURN_ENV, "deck");
+                    if let Ok(exe) = std::env::current_exe() {
+                        let err = std::process::Command::new(&exe).arg("play").exec();
+                        eprintln!("return-to-picker exec failed: {err}");
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
     std::process::exit(code);

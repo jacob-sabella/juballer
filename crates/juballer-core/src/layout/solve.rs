@@ -27,7 +27,7 @@ fn place(node: &Node, rect: Rect, out: &mut IndexMap<PaneId, Rect>) {
             children,
         } => {
             let child_rects = compute_stack(*dir, *gap_px, children, rect);
-            for ((_, child), child_rect) in children.iter().zip(child_rects.into_iter()) {
+            for ((_, child), child_rect) in children.iter().zip(child_rects) {
                 place(child, child_rect, out);
             }
         }
