@@ -1,0 +1,154 @@
+# Example Carla configuration for juballer.
+#
+# Drop a copy of this file at ~/.config/juballer/carla/configs/<name>.toml
+# and start the mode with `juballer-deck carla` (or pass a custom path).
+#
+# Numeric `plugin = N` and `param = N` indices match Carla's slot /
+# parameter ordering — find them via Carla's own UI or its OSC
+# `/Carla/<plugin>/get_parameter_info` query. Phase 1 only dispatches
+# numeric indices; named plugins log a warning and skip.
+
+name = "Sample Drum Bus FX"
+description = "Two-page demo: a reverb page and a compressor page."
+
+# Defaults match Carla's built-in OSC server. Override host/port if
+# you've remapped them in Carla's settings (or you're hosting Carla
+# on a separate box on your LAN).
+[carla]
+host = "127.0.0.1"
+port = 22752
+
+# ─── Page 1 — Reverb ──────────────────────────────────────────────
+[[page]]
+title = "Reverb"
+
+# Row 0: a vertical "Wet" channel. Tap = bump, hold = jump to 0.0
+# (kill the wet signal entirely with a single long press).
+[[page.cell]]
+row = 0
+col = 0
+label = "Wet +5%"
+[page.cell.tap]
+plugin = 0
+param = 1
+mode = "bump-up"
+step = 0.05
+min = 0.0
+max = 1.0
+[page.cell.hold]
+plugin = 0
+param = 1
+mode = "set"
+value = 0.0
+
+[[page.cell]]
+row = 0
+col = 1
+label = "Wet −5%"
+[page.cell.tap]
+plugin = 0
+param = 1
+mode = "bump-down"
+step = 0.05
+min = 0.0
+max = 1.0
+
+# Row 1: bypass toggle. Tap flips the param between 0.0 and 1.0;
+# the dispatcher tracks the cached value so a second tap restores it.
+[[page.cell]]
+row = 1
+col = 0
+label = "Bypass"
+[page.cell.tap]
+plugin = 0
+param = 0
+mode = "toggle"
+on_value = 1.0
+off_value = 0.0
+
+# Row 1, col 2: momentary "freeze". Press-down sends 1.0; release
+# sends 0.0 — even after a long hold (so the param can't stick on).
+[[page.cell]]
+row = 1
+col = 2
+label = "Freeze"
+[page.cell.tap]
+plugin = 0
+param = 5
+mode = "momentary"
+on_value = 1.0
+off_value = 0.0
+
+# Row 2: discrete reverb-type carousel. Cycles through four IR slots.
+[[page.cell]]
+row = 2
+col = 0
+label = "Type ▶"
+[page.cell.tap]
+plugin = 0
+param = 7
+mode = "carousel-next"
+values = [0.0, 1.0, 2.0, 3.0]
+value_labels = ["Plate", "Hall", "Spring", "Chamber"]
+
+[[page.cell]]
+row = 2
+col = 1
+label = "Type ◀"
+[page.cell.tap]
+plugin = 0
+param = 7
+mode = "carousel-prev"
+values = [0.0, 1.0, 2.0, 3.0]
+value_labels = ["Plate", "Hall", "Spring", "Chamber"]
+
+# ─── Page 2 — Compressor ──────────────────────────────────────────
+[[page]]
+title = "Compressor"
+
+[[page.cell]]
+row = 0
+col = 0
+label = "Threshold +"
+[page.cell.tap]
+plugin = 1
+param = 0
+mode = "bump-up"
+step = 1.0
+min = -60.0
+max = 0.0
+
+[[page.cell]]
+row = 0
+col = 1
+label = "Threshold −"
+[page.cell.tap]
+plugin = 1
+param = 0
+mode = "bump-down"
+step = 1.0
+min = -60.0
+max = 0.0
+
+[[page.cell]]
+row = 1
+col = 0
+label = "Ratio ▶"
+[page.cell.tap]
+plugin = 1
+param = 1
+mode = "carousel-next"
+values = [2.0, 4.0, 8.0, 12.0, 20.0]
+
+# Display cell — Phase 2 will wake this up. Today it parses, validates,
+# and the renderer paints it with the dimmer "display" palette so you
+# can see the layout you're going to get.
+[[page.cell]]
+row = 2
+col = 3
+label = "Gain Reduction"
+[page.cell.display]
+mode = "meter"
+plugin = 1
+source_param = 8
+poll_hz = 30

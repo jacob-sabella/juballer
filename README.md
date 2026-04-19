@@ -102,6 +102,31 @@ a required dependency — nothing else in the workspace depends on it.
 The rhythm pipeline lives entirely under
 `crates/juballer-deck/src/rhythm/`.
 
+### Carla audio-FX control surface
+
+`juballer-deck carla` turns the grid into an OSC remote for
+[Carla](https://kx.studio/Applications:Carla). Each cell binds to a
+plugin parameter via tap and/or hold actions; sub-pages within a
+configuration are walked via the bottom-row `PAGE-PREV` / `PAGE-NEXT`
+cells.
+
+- Configurations live at `~/.config/juballer/carla/configs/<name>.toml`.
+  See `crates/juballer-deck/examples/carla/sample-config.toml` for a
+  two-page demo exercising every Phase 1 action mode.
+- Phase 1 input modes: `bump-up` / `bump-down` (configurable step,
+  optional clamps), `toggle`, `momentary`, `set`, and
+  `carousel-next` / `carousel-prev` for cycling discrete value lists
+  (filter type, oversampling factor, etc).
+- A single cell can attach **tap** + **hold** + **display** bindings
+  independently. Hold fires when the press duration crosses a 350 ms
+  threshold; momentary on the tap slot honours both press-down and
+  release edges.
+- Display cells (`tuner`, `meter`, `value`, `text`) and preset cells
+  (`load-preset`, `open-preset-picker`) parse and validate today; the
+  Phase 2 / 3 runtime will wake them up without a schema migration.
+- Defaults to Carla's built-in OSC server on `127.0.0.1:22752`;
+  override per-config in the `[carla]` block.
+
 ## Install
 
 ### From source

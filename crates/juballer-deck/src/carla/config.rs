@@ -171,7 +171,7 @@ pub struct Action {
 }
 
 /// What an action does to its parameter when triggered.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum ActionMode {
     // Phase 1
