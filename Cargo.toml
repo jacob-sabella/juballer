@@ -73,4 +73,8 @@ all = { level = "warn", priority = -1 }
 # `IntoIterator<Item = …>`; the explicit borrow reads cleaner.
 needless_borrow = "allow"
 needless_borrows_for_generic_args = "allow"
+# `crate::Error` is intentionally rich (carries source contexts +
+# Windows variants) so its size triggers result_large_err in places
+# that bubble it. Boxing every Result would obscure the call sites.
+result_large_err = "allow"
 

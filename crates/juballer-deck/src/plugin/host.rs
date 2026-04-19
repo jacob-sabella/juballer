@@ -13,7 +13,9 @@
 use crate::app::NamedTileOverride;
 use crate::Result;
 use juballer_deck_protocol::view::ViewNode;
-use juballer_deck_protocol::{Message, PROTOCOL_VERSION};
+use juballer_deck_protocol::Message;
+#[cfg(unix)]
+use juballer_deck_protocol::PROTOCOL_VERSION;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
@@ -90,6 +92,7 @@ impl PluginHost {
         self.status_tx = Some(tx);
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn emit_status(&self, name: &str, status: PluginStatus) {
         if let Some(tx) = &self.status_tx {
             let _ = tx.send(PluginStatusEvent {
@@ -280,6 +283,11 @@ impl PluginHost {
         tracing::warn!("plugin host: non-unix platforms not supported");
         Ok(())
     }
+
+    #[cfg(not(unix))]
+    pub async fn restart_one(&mut self, _name: &str, _rt: &tokio::runtime::Handle) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 #[cfg(unix)]
@@ -360,6 +368,7 @@ async fn run_connection(
 /// Merge a `TileSetByName` message into the shared override store. `clear=true`
 /// removes the entry entirely (restoring config defaults at paint time); omitted
 /// fields preserve the current plugin-override value so partial updates chain.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn apply_tile_set_by_name(
     store: &NamedTileStore,
     name: String,
@@ -390,6 +399,7 @@ fn apply_tile_set_by_name(
 /// Parse the `{"kind":"widget.view_update","pane":...,"tree":...}` envelope used by
 /// the locked plugin → deck view-tree wire format. Returns `None` if the line is not a
 /// view_update envelope (caller should then fall back to `Message` parsing).
+#[cfg_attr(not(unix), allow(dead_code))]
 fn parse_view_update_envelope(line: &str) -> Option<(String, ViewNode)> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
     let obj = v.as_object()?;
