@@ -4,6 +4,7 @@
 pub mod action;
 pub mod app;
 pub mod bus;
+pub mod carla;
 pub mod cli;
 pub mod config;
 pub mod editor;
