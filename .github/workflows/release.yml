@@ -28,7 +28,7 @@ jobs:
     name: Build (${{ matrix.name }})
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -81,7 +81,7 @@ jobs:
             -DestinationPath "juballer-${{ github.ref_name }}-${{ matrix.name }}.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: juballer-${{ github.ref_name }}-${{ matrix.name }}
           path: |
@@ -97,13 +97,15 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
           files: artifacts/*
           generate_release_notes: true

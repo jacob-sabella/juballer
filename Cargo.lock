@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "juballer-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bytemuck",
  "criterion",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "juballer-deck"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "arboard",
  "axum",
@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "juballer-deck-protocol"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2150,7 +2150,7 @@ dependencies = [
 
 [[package]]
 name = "juballer-egui"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "juballer-gestures"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "juballer-core",
 ]
