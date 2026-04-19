@@ -355,8 +355,12 @@ async fn write_page_triggers_watcher_signal() {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/multipage");
     copy_dir(&src, tmp.path()).unwrap();
 
-    let (_w, rx) =
-        watch(tmp.path(), std::time::Duration::from_millis(150), Vec::new()).unwrap();
+    let (_w, rx) = watch(
+        tmp.path(),
+        std::time::Duration::from_millis(150),
+        Vec::new(),
+    )
+    .unwrap();
 
     let rt = tokio::runtime::Handle::current();
     let paths = DeckPaths::from_root(tmp.path().to_path_buf());
