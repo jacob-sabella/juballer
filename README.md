@@ -17,9 +17,14 @@ whatever widget owns that cell.
 
 Built on [wgpu](https://wgpu.rs) and [egui](https://github.com/emilk/egui)
 so every cell can host a shader, an image, an animated widget, or a custom
-UI panel — without giving up a sub-frame input path. Cross-platform:
-**Linux** (primary) and **Windows**, with macOS support via the same wgpu
-backend.
+UI panel — without giving up a sub-frame input path.
+
+> **Platform support.** Linux is the only tested platform — that's
+> what gets used day-to-day with real hardware. Windows builds on
+> every CI run (fmt + clippy + `cargo build`) so the code stays
+> cross-platform, but the Windows binary has not been exercised
+> against an actual GAMO2 FB9 controller yet. macOS is reachable via
+> the same wgpu backend in principle but isn't built or tested.
 
 ![Default deck with widgets and the action grid](screenshots/deck-default.png)
 
