@@ -102,6 +102,18 @@ pub enum SubCmd {
         #[arg(long, default_value_t = 0)]
         audio_offset_ms: i32,
     },
+    /// Carla audio-FX control surface. Loads a configuration TOML and
+    /// turns the 4×4 grid into an OSC remote for Carla — each cell binds
+    /// to a plugin parameter (or pair of them via tap + hold). When
+    /// `CONFIG` is omitted, falls back to the first `*.toml` under
+    /// `~/.config/juballer/carla/configs/`. Phase 1: input cells only;
+    /// display + preset modes parse but no-op.
+    Carla {
+        /// Path to a Carla configuration TOML. When omitted, picks the
+        /// alphabetically-first file from the default config dir.
+        #[arg(value_name = "CONFIG")]
+        config: Option<PathBuf>,
+    },
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -207,6 +219,18 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(SubCmd::Tutorial { audio_offset_ms }) => {
             return crate::rhythm::run_tutorial(audio_offset_ms);
+        }
+        Some(SubCmd::Carla { config }) => {
+            let path = match config {
+                Some(p) => p,
+                None => first_carla_config().ok_or_else(|| {
+                    crate::Error::Config(format!(
+                        "no carla config supplied and none found under {}",
+                        crate::carla::config::default_configs_dir().display()
+                    ))
+                })?,
+            };
+            return crate::carla::run(&path);
         }
         None => None,
     };
@@ -330,6 +354,22 @@ pub fn run(cli: Cli) -> Result<()> {
         }
     })?;
     Ok(())
+}
+
+/// Pick a Carla configuration when the user invokes `carla` with no
+/// argument. Returns the alphabetically-first `*.toml` file under the
+/// default carla configs dir, or `None` if the dir is missing / empty.
+/// Phase 6 will replace this with the on-grid config picker.
+fn first_carla_config() -> Option<std::path::PathBuf> {
+    let dir = crate::carla::config::default_configs_dir();
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|r| r.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("toml"))
+        .collect();
+    entries.sort();
+    entries.into_iter().next()
 }
 
 fn wire_plugin_host(deck: &mut DeckApp, rt: &tokio::runtime::Handle) {

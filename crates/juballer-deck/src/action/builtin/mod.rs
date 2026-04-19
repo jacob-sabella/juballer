@@ -1,6 +1,7 @@
 //! Built-in actions.
 
 pub mod app_launch;
+pub mod carla_launch;
 pub mod clipboard_set;
 pub mod counter_decrement;
 pub mod counter_display;

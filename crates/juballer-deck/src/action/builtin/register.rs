@@ -887,6 +887,26 @@ pub fn register_builtins(registry: &mut ActionRegistry) {
             }
         }),
     );
+
+    registry.register_with_schema::<carla_launch::CarlaLaunch>(
+        "carla.launch",
+        json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "title": "Launch carla mode",
+            "description": "Hand the current process over to juballer's carla audio-FX control \
+                surface mode via exec(). Replaces the deck app rather than spawning a child so \
+                only one window / HID claim is live at a time. When `config` is omitted the \
+                carla subcommand picks the alphabetically-first file from \
+                `~/.config/juballer/carla/configs/`.",
+            "properties": {
+                "config": {
+                    "type": "string",
+                    "description": "Path to a Carla configuration TOML."
+                }
+            }
+        }),
+    );
 }
 
 #[cfg(test)]
