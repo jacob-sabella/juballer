@@ -131,7 +131,7 @@ impl EguiOverlay {
         self.pixels_per_point = ppp;
     }
 
-    fn ensure_renderer(&mut self, frame: &Frame) {
+    fn ensure_renderer(&mut self, frame: &Frame<'_>) {
         if self.renderer.is_none() {
             self.renderer = Some(Renderer::new(
                 frame.device(),
@@ -146,7 +146,7 @@ impl EguiOverlay {
     /// Run egui for this frame. The `builder` closure receives a `RegionCtx` that provides
     /// `in_top_pane` / `in_grid_cell` helpers for scoping UI to juballer regions, backed by
     /// `egui::Area` instances placed at the pixel positions computed by juballer-core's layout.
-    pub fn draw<F: FnOnce(&mut RegionCtx)>(&mut self, frame: &mut Frame, builder: F) {
+    pub fn draw<F: FnOnce(&mut RegionCtx<'_>)>(&mut self, frame: &mut Frame<'_>, builder: F) {
         self.ensure_renderer(frame);
         let renderer = self.renderer.as_mut().expect("renderer ensured");
 

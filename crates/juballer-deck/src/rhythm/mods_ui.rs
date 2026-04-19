@@ -170,9 +170,7 @@ fn paint_backgrounds(frame: &mut Frame) {
         for c in 0..4u8 {
             let color = if r == 3 && c == 3 {
                 exit
-            } else if r == 3 {
-                unused
-            } else if ModRow::from_row(r).is_none() {
+            } else if r == 3 || ModRow::from_row(r).is_none() {
                 unused
             } else {
                 match c {

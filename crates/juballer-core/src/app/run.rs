@@ -6,7 +6,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
 
-struct Runtime<F: FnMut(&mut crate::Frame, &[crate::input::Event])> {
+struct Runtime<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> {
     cfg: crate::AppBuilder,
     cfg_top_layout: Option<crate::layout::Node>,
     profile: Option<crate::Profile>,
@@ -27,7 +27,7 @@ struct Runtime<F: FnMut(&mut crate::Frame, &[crate::input::Event])> {
     raw_ring: Option<std::sync::Arc<crate::input::EventRing>>,
 }
 
-impl<F: FnMut(&mut crate::Frame, &[crate::input::Event])> ApplicationHandler for Runtime<F> {
+impl<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> ApplicationHandler for Runtime<F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -473,7 +473,7 @@ impl<F: FnMut(&mut crate::Frame, &[crate::input::Event])> ApplicationHandler for
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_one_frame<F: FnMut(&mut crate::Frame, &[crate::input::Event])>(
+fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
     gpu: &mut Gpu,
     bg: Color,
     cell_rects: &[crate::Rect; 16],
@@ -787,7 +787,7 @@ impl App {
     /// Run the app with a user draw callback receiving a `Frame` and pending `Event` slice.
     pub fn run<F>(self, draw: F) -> Result<()>
     where
-        F: FnMut(&mut crate::Frame, &[crate::input::Event]) + 'static,
+        F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event]) + 'static,
     {
         let event_loop = winit::event_loop::EventLoop::new()?;
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);

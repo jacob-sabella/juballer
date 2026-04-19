@@ -319,6 +319,7 @@ pub fn play_chart_with_hook<H: NarrationHook + 'static>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn play_chart_inner<H: NarrationHook + 'static>(
     chart: Chart,
     user_offset_ms: i32,

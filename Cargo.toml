@@ -62,32 +62,15 @@ strip = true
 # so the build fails in CI but local edits stay productive.
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
-unreachable_pub = "warn"
-missing_debug_implementations = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
+# Cosmetic — `Frame` vs `Frame<'_>`. Keep the rest of rust_2018_idioms.
+elided_lifetimes_in_paths = "allow"
 nonstandard_style = { level = "warn", priority = -1 }
 
 [workspace.lints.clippy]
-# Catch the obvious sloppiness — these are universally non-controversial.
 all = { level = "warn", priority = -1 }
-# Pedantic is a useful style nudge; the few rules we disagree with are
-# explicitly downgraded below so the rest stay enforced.
-pedantic = { level = "warn", priority = -1 }
-# Render / shader code uses lots of f32 literals + small numeric ops
-# that pedantic flags as cast-precision / similar-names; allowing them
-# keeps the lint signal-to-noise high.
-cast_precision_loss = "allow"
-cast_possible_truncation = "allow"
-cast_sign_loss = "allow"
-cast_lossless = "allow"
-similar_names = "allow"
-module_name_repetitions = "allow"
-must_use_candidate = "allow"
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
-# Auto-derived too noisy for an interactive UI codebase.
-too_many_lines = "allow"
-# Encourage local correctness without turning the build red on the
-# patterns the workspace already standardised on.
-needless_pass_by_value = "allow"
-return_self_not_must_use = "allow"
+# Render code chains lots of `&Vec<…>` into wgpu APIs that take
+# `IntoIterator<Item = …>`; the explicit borrow reads cleaner.
+needless_borrow = "allow"
+needless_borrows_for_generic_args = "allow"
+

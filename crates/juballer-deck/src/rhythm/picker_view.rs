@@ -274,7 +274,7 @@ pub fn apply_filters(
 /// use locale-insensitive case-folded comparison so "abc" and "ABC"
 /// don't sort apart. BPM falls back to title for ties so the order is
 /// stable across runs.
-pub fn apply_sort(entries: &mut Vec<ChartEntry>, view: &PickerView) {
+pub fn apply_sort(entries: &mut [ChartEntry], view: &PickerView) {
     let cmp_title =
         |a: &ChartEntry, b: &ChartEntry| a.title.to_lowercase().cmp(&b.title.to_lowercase());
     match view.sort {
@@ -340,8 +340,10 @@ mod tests {
             entry("alpha", "x", 110.0, 200, &["BSC"]),
             entry("Bravo", "x", 130.0, 300, &["BSC"]),
         ];
-        let mut view = PickerView::default();
-        view.sort = SortMode::Title;
+        let mut view = PickerView {
+            sort: SortMode::Title,
+            ..PickerView::default()
+        };
         apply_sort(&mut v, &view);
         assert_eq!(
             v.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
@@ -363,8 +365,10 @@ mod tests {
         ];
         let mut favs = FavoriteBook::new();
         favs.toggle(&v[1].path);
-        let mut view = PickerView::default();
-        view.favorite_filter = FavoriteFilter::OnlyFavs;
+        let view = PickerView {
+            favorite_filter: FavoriteFilter::OnlyFavs,
+            ..PickerView::default()
+        };
         let kept = apply_filters(&v, &view, &favs);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].title, "song2");
@@ -377,8 +381,10 @@ mod tests {
             entry("b", "x", 120.0, 100, &["BSC"]),
             entry("c", "x", 120.0, 100, &["EXT"]),
         ];
-        let mut view = PickerView::default();
-        view.difficulty_filter = DifficultyFilter::Adv;
+        let view = PickerView {
+            difficulty_filter: DifficultyFilter::Adv,
+            ..PickerView::default()
+        };
         let kept = apply_filters(&v, &view, &FavoriteBook::new());
         assert_eq!(
             kept.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),

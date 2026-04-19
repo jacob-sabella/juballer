@@ -56,9 +56,9 @@ fn band_edges_hz(sample_rate: f32) -> [f32; NUM_BINS + 1] {
     let mut edges = [0.0f32; NUM_BINS + 1];
     let ln_lo = lo.ln();
     let ln_hi = hi.ln();
-    for i in 0..=NUM_BINS {
+    for (i, edge) in edges.iter_mut().enumerate() {
         let t = i as f32 / NUM_BINS as f32;
-        edges[i] = (ln_lo + t * (ln_hi - ln_lo)).exp();
+        *edge = (ln_lo + t * (ln_hi - ln_lo)).exp();
     }
     edges
 }
@@ -276,7 +276,7 @@ impl SharedSpectrum {
             .inner
             .snapshot_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if n.is_multiple_of(120) {
+        if n % 120 == 0 {
             let peak = out.iter().fold(0.0f32, |a, &b| a.max(b));
             let avg: f32 = out.iter().sum::<f32>() / NUM_BINS as f32;
             tracing::info!(

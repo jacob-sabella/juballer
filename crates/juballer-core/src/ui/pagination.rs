@@ -89,7 +89,7 @@ impl<T> Paginator<T> {
         if self.items.is_empty() {
             1
         } else {
-            (self.items.len() + self.per_page - 1) / self.per_page
+            self.items.len().div_ceil(self.per_page)
         }
     }
 
