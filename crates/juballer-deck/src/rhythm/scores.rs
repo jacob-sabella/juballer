@@ -147,6 +147,15 @@ impl ScoreBook {
     pub fn best(&self, chart_path: &Path, difficulty: &str) -> Option<&ScoreRecord> {
         self.top_n(chart_path, difficulty).first()
     }
+
+    /// Most recent `played_at` timestamp across every record on this
+    /// key, returned as the raw RFC3339 string for cheap lexicographic
+    /// comparison (RFC3339 sorts naturally). Returns `None` when the
+    /// chart has never been played at this difficulty.
+    pub fn last_played(&self, chart_path: &Path, difficulty: &str) -> Option<&str> {
+        let records = self.top_n(chart_path, difficulty);
+        records.iter().map(|r| r.played_at.as_str()).max()
+    }
 }
 
 #[cfg(test)]

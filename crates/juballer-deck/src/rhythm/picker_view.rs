@@ -18,6 +18,7 @@
 
 use super::favorites::FavoriteBook;
 use super::picker::ChartEntry;
+use super::scores::ScoreBook;
 use crate::config::atomic::atomic_write;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -31,6 +32,12 @@ pub enum SortMode {
     Bpm,
     Level,
     Notes,
+    /// Most recently played chart first by default. Charts that have
+    /// never been played sort to the bottom in either direction.
+    LastPlayed,
+    /// Personal best score for the active difficulty. Higher score
+    /// first by default. Unscored charts sort to the bottom.
+    Score,
 }
 
 impl SortMode {
@@ -42,21 +49,35 @@ impl SortMode {
             SortMode::Bpm => "bpm",
             SortMode::Level => "level",
             SortMode::Notes => "notes",
+            SortMode::LastPlayed => "last played",
+            SortMode::Score => "score",
         }
     }
 
-    pub const ALL: [SortMode; 6] = [
+    pub const ALL: [SortMode; 8] = [
         SortMode::Default,
         SortMode::Title,
         SortMode::Artist,
         SortMode::Bpm,
         SortMode::Level,
         SortMode::Notes,
+        SortMode::LastPlayed,
+        SortMode::Score,
     ];
 
     pub fn next(self) -> Self {
         let idx = Self::ALL.iter().position(|m| *m == self).unwrap_or(0);
         Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    /// Default direction for this mode. Most users want last-played
+    /// and score in *descending* order (most recent / highest first);
+    /// the alphabetic / numeric modes default to ascending.
+    pub fn default_direction(self) -> SortDirection {
+        match self {
+            SortMode::LastPlayed | SortMode::Score => SortDirection::Desc,
+            _ => SortDirection::Asc,
+        }
     }
 }
 
@@ -274,7 +295,18 @@ pub fn apply_filters(
 /// use locale-insensitive case-folded comparison so "abc" and "ABC"
 /// don't sort apart. BPM falls back to title for ties so the order is
 /// stable across runs.
-pub fn apply_sort(entries: &mut [ChartEntry], view: &PickerView) {
+///
+/// `scores` + `difficulty` are consulted for the [`SortMode::LastPlayed`]
+/// and [`SortMode::Score`] modes; other modes ignore them. Charts with
+/// no entry in the score book sort to the bottom in either direction
+/// (i.e. they never land at the top of a "last played" list just
+/// because their absence happens to compare lower).
+pub fn apply_sort(
+    entries: &mut [ChartEntry],
+    view: &PickerView,
+    scores: &ScoreBook,
+    difficulty: &str,
+) {
     let cmp_title =
         |a: &ChartEntry, b: &ChartEntry| a.title.to_lowercase().cmp(&b.title.to_lowercase());
     match view.sort {
@@ -305,9 +337,67 @@ pub fn apply_sort(entries: &mut [ChartEntry], view: &PickerView) {
                 .cmp(&b.note_count)
                 .then_with(|| cmp_title(a, b))
         }),
+        SortMode::LastPlayed => {
+            // Sort ascending by timestamp (oldest → newest). The
+            // direction-flip below puts most recent first when the
+            // user picks Desc (the default for this mode). Unscored
+            // charts get a sentinel that, after the optional reverse,
+            // still lands them at the bottom of either direction.
+            entries.sort_by(|a, b| {
+                let av = scores.last_played(&a.path, difficulty);
+                let bv = scores.last_played(&b.path, difficulty);
+                last_played_cmp(av, bv, view.direction)
+                    .then_with(|| cmp_title(a, b))
+            });
+        }
+        SortMode::Score => {
+            entries.sort_by(|a, b| {
+                let av = scores.best(&a.path, difficulty).map(|r| r.score);
+                let bv = scores.best(&b.path, difficulty).map(|r| r.score);
+                score_cmp(av, bv, view.direction).then_with(|| cmp_title(a, b))
+            });
+        }
     }
-    if matches!(view.direction, SortDirection::Desc) && !matches!(view.sort, SortMode::Default) {
+    // The two score-aware modes do their own direction handling above
+    // so the unscored-charts-to-the-bottom invariant survives the
+    // flip; everything else flips here.
+    let already_directional = matches!(view.sort, SortMode::LastPlayed | SortMode::Score);
+    if matches!(view.direction, SortDirection::Desc)
+        && !matches!(view.sort, SortMode::Default)
+        && !already_directional
+    {
         entries.reverse();
+    }
+}
+
+/// Compare two timestamp slots so unscored entries always sort to the
+/// bottom regardless of direction. In ASC, earlier dates come first
+/// (None at end); in DESC, later dates come first (None still at end).
+fn last_played_cmp(a: Option<&str>, b: Option<&str>, dir: SortDirection) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+        (Some(a), Some(b)) => match dir {
+            SortDirection::Asc => a.cmp(b),
+            SortDirection::Desc => b.cmp(a),
+        },
+    }
+}
+
+/// Same idea for scores: Some(score) always beats None, then within
+/// the Some/Some case the direction picks ascending or descending.
+fn score_cmp(a: Option<u64>, b: Option<u64>, dir: SortDirection) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+        (Some(a), Some(b)) => match dir {
+            SortDirection::Asc => a.cmp(&b),
+            SortDirection::Desc => b.cmp(&a),
+        },
     }
 }
 
@@ -344,13 +434,13 @@ mod tests {
             sort: SortMode::Title,
             ..PickerView::default()
         };
-        apply_sort(&mut v, &view);
+        apply_sort(&mut v, &view, &ScoreBook::new(), "BSC");
         assert_eq!(
             v.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
             vec!["alpha", "Bravo", "Charlie"]
         );
         view.direction = SortDirection::Desc;
-        apply_sort(&mut v, &view);
+        apply_sort(&mut v, &view, &ScoreBook::new(), "BSC");
         assert_eq!(
             v.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
             vec!["Charlie", "Bravo", "alpha"]
@@ -389,6 +479,183 @@ mod tests {
         assert_eq!(
             kept.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
             vec!["a"]
+        );
+    }
+
+    fn record_with_score_at(score: u64, played_at: &str) -> super::super::scores::ScoreRecord {
+        super::super::scores::ScoreRecord {
+            score,
+            max_combo: 0,
+            accuracy_pct: 0.0,
+            grade_counts: std::collections::HashMap::new(),
+            played_at: played_at.into(),
+        }
+    }
+
+    fn populated_book(rows: &[(&str, u64, &str)]) -> ScoreBook {
+        let mut book = ScoreBook::new();
+        for (title, score, ts) in rows {
+            // Recompute the same canonical path the entry helper uses.
+            let path = PathBuf::from(format!("/charts/pack_a/{title}/song.memon"));
+            book.record(&path, "BSC", record_with_score_at(*score, ts));
+        }
+        book
+    }
+
+    #[test]
+    fn sort_score_desc_puts_highest_first_unscored_last() {
+        let mut v = vec![
+            entry("alpha", "x", 120.0, 100, &["BSC"]),
+            entry("Bravo", "x", 120.0, 100, &["BSC"]),
+            entry("Charlie", "x", 120.0, 100, &["BSC"]),
+        ];
+        let book = populated_book(&[
+            ("alpha", 5_000, "2026-04-19T18:00:00Z"),
+            ("Bravo", 9_000, "2026-04-19T19:00:00Z"),
+            // Charlie unscored intentionally.
+        ]);
+        let view = PickerView {
+            sort: SortMode::Score,
+            direction: SortDirection::Desc,
+            ..PickerView::default()
+        };
+        apply_sort(&mut v, &view, &book, "BSC");
+        let titles: Vec<String> = v.iter().map(|e| e.title.clone()).collect();
+        assert_eq!(titles, vec!["Bravo", "alpha", "Charlie"]);
+    }
+
+    #[test]
+    fn sort_score_asc_puts_lowest_first_unscored_still_last() {
+        let mut v = vec![
+            entry("alpha", "x", 120.0, 100, &["BSC"]),
+            entry("Bravo", "x", 120.0, 100, &["BSC"]),
+            entry("Charlie", "x", 120.0, 100, &["BSC"]),
+        ];
+        let book = populated_book(&[
+            ("alpha", 5_000, "2026-04-19T18:00:00Z"),
+            ("Bravo", 9_000, "2026-04-19T19:00:00Z"),
+        ]);
+        let view = PickerView {
+            sort: SortMode::Score,
+            direction: SortDirection::Asc,
+            ..PickerView::default()
+        };
+        apply_sort(&mut v, &view, &book, "BSC");
+        let titles: Vec<String> = v.iter().map(|e| e.title.clone()).collect();
+        // Lowest score first; unscored Charlie still pinned to the bottom.
+        assert_eq!(titles, vec!["alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn sort_last_played_desc_orders_by_most_recent_session() {
+        let mut v = vec![
+            entry("alpha", "x", 120.0, 100, &["BSC"]),
+            entry("Bravo", "x", 120.0, 100, &["BSC"]),
+            entry("Charlie", "x", 120.0, 100, &["BSC"]),
+        ];
+        let book = populated_book(&[
+            ("alpha", 1, "2026-04-19T18:00:00Z"),
+            ("Bravo", 1, "2026-04-19T19:30:00Z"),
+            ("Charlie", 1, "2026-04-19T17:00:00Z"),
+        ]);
+        let view = PickerView {
+            sort: SortMode::LastPlayed,
+            direction: SortDirection::Desc,
+            ..PickerView::default()
+        };
+        apply_sort(&mut v, &view, &book, "BSC");
+        let titles: Vec<String> = v.iter().map(|e| e.title.clone()).collect();
+        assert_eq!(titles, vec!["Bravo", "alpha", "Charlie"]);
+    }
+
+    #[test]
+    fn sort_last_played_pins_never_played_charts_to_bottom_in_asc_too() {
+        let mut v = vec![
+            entry("alpha", "x", 120.0, 100, &["BSC"]),
+            entry("Bravo", "x", 120.0, 100, &["BSC"]),
+            entry("Never", "x", 120.0, 100, &["BSC"]),
+        ];
+        let book = populated_book(&[
+            ("alpha", 1, "2026-04-19T18:00:00Z"),
+            ("Bravo", 1, "2026-04-19T19:00:00Z"),
+        ]);
+        let view = PickerView {
+            sort: SortMode::LastPlayed,
+            direction: SortDirection::Asc,
+            ..PickerView::default()
+        };
+        apply_sort(&mut v, &view, &book, "BSC");
+        let titles: Vec<String> = v.iter().map(|e| e.title.clone()).collect();
+        // Asc: oldest first, Never always last.
+        assert_eq!(titles, vec!["alpha", "Bravo", "Never"]);
+    }
+
+    #[test]
+    fn sort_score_only_consults_active_difficulty_records() {
+        let mut v = vec![
+            entry("alpha", "x", 120.0, 100, &["BSC", "ADV"]),
+            entry("Bravo", "x", 120.0, 100, &["BSC", "ADV"]),
+        ];
+        let mut book = ScoreBook::new();
+        // alpha has a higher BSC than Bravo, but Bravo's higher score
+        // is on ADV — sorting by BSC should keep alpha on top.
+        book.record(
+            &PathBuf::from("/charts/pack_a/alpha/song.memon"),
+            "BSC",
+            record_with_score_at(8_000, "2026-04-19T18:00:00Z"),
+        );
+        book.record(
+            &PathBuf::from("/charts/pack_a/Bravo/song.memon"),
+            "BSC",
+            record_with_score_at(2_000, "2026-04-19T18:00:00Z"),
+        );
+        book.record(
+            &PathBuf::from("/charts/pack_a/Bravo/song.memon"),
+            "ADV",
+            record_with_score_at(99_000, "2026-04-19T19:00:00Z"),
+        );
+        let view = PickerView {
+            sort: SortMode::Score,
+            direction: SortDirection::Desc,
+            ..PickerView::default()
+        };
+        apply_sort(&mut v, &view, &book, "BSC");
+        let titles: Vec<String> = v.iter().map(|e| e.title.clone()).collect();
+        assert_eq!(titles, vec!["alpha", "Bravo"]);
+    }
+
+    #[test]
+    fn last_played_returns_most_recent_record_across_replays() {
+        let path = PathBuf::from("/charts/pack_a/alpha/song.memon");
+        let mut book = ScoreBook::new();
+        book.record(
+            &path,
+            "BSC",
+            record_with_score_at(1, "2026-04-19T18:00:00Z"),
+        );
+        book.record(
+            &path,
+            "BSC",
+            record_with_score_at(2, "2026-04-19T18:30:00Z"),
+        );
+        book.record(
+            &path,
+            "BSC",
+            record_with_score_at(3, "2026-04-19T17:00:00Z"),
+        );
+        // RFC3339 strings sort lexicographically as time order, so the
+        // 18:30 entry wins.
+        let last = book.last_played(&path, "BSC").unwrap();
+        assert_eq!(last, "2026-04-19T18:30:00Z");
+    }
+
+    #[test]
+    fn sort_mode_default_direction_inverts_for_score_aware_modes() {
+        assert_eq!(SortMode::Title.default_direction(), SortDirection::Asc);
+        assert_eq!(SortMode::Score.default_direction(), SortDirection::Desc);
+        assert_eq!(
+            SortMode::LastPlayed.default_direction(),
+            SortDirection::Desc
         );
     }
 

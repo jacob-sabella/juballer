@@ -745,13 +745,20 @@ fn handle_filter_press(
 /// in a fresh paginator. Called at picker init and again any time the
 /// view (sort/filter) or favorites change so the on-screen grid stays
 /// in sync with the user's selections.
+///
+/// `scores` + `difficulty` are read by the score-aware sort modes
+/// ([`SortMode::LastPlayed`], [`SortMode::Score`]); other modes
+/// ignore them but the parameters stay required so the score book
+/// stays threaded through every rebuild path.
 fn build_paginator(
     all_entries: &[ChartEntry],
     view: &PickerView,
     favs: &FavoriteBook,
+    scores: &ScoreBook,
+    difficulty: &str,
 ) -> crate::rhythm::pagination::Paginator<ChartEntry> {
     let mut filtered = apply_filters(all_entries, view, favs);
-    apply_sort(&mut filtered, view);
+    apply_sort(&mut filtered, view, scores, difficulty);
     crate::rhythm::pagination::Paginator::new(filtered, CHART_CELLS_PER_PAGE)
 }
 
@@ -793,10 +800,25 @@ pub fn pick(
     let mut favs = FavoriteBook::load_default().unwrap_or_default();
     let all_packs = discover_packs(&entries);
     let all_entries: Vec<ChartEntry> = entries; // keep the unfiltered library
-                                                // Library can exceed the 12-slot grid; wrap in a paginator and reserve
-                                                // (3,0)=PREV, (3,1)=NEXT for navigation on top of the existing
-                                                // (3,2)=PLAY / (3,3)=EXIT buttons.
-    let mut paginator = build_paginator(&all_entries, &view, &favs);
+                                                // CLI-supplied difficulty is the *fallback default* when the focused
+                                                // chart doesn't expose that difficulty (so single-diff charts still
+                                                // work out-of-the-box). Per-chart cycling via the PLAY cell overrides
+                                                // this at commit time. Hoisted up here so the score-aware paginator
+                                                // build can borrow it.
+    let exec_default_diff = difficulty.to_string();
+    // Score book — both the paginator-build (sort by last-played / score)
+    // and the per-tile best-score badge consume it.
+    let book = ScoreBook::load_default().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "juballer::rhythm::picker",
+            "score book load failed: {e}"
+        );
+        ScoreBook::new()
+    });
+    // Library can exceed the 12-slot grid; wrap in a paginator and
+    // reserve (3,0)=PREV, (3,1)=NEXT for navigation on top of the
+    // existing (3,2)=PLAY / (3,3)=EXIT buttons.
+    let mut paginator = build_paginator(&all_entries, &view, &favs, &book, &exec_default_diff);
 
     let mut app = App::builder()
         .title("juballer — chart select")
@@ -807,26 +829,14 @@ pub fn pick(
     app.set_debug(false);
 
     let mut overlay = EguiOverlay::new();
-    // CLI-supplied difficulty is the *fallback default* when the focused
-    // chart doesn't expose that difficulty (so single-diff charts still
-    // work out-of-the-box). Per-chart cycling via the PLAY cell overrides
-    // this at commit time.
-    let exec_default_diff = difficulty.to_string();
     let exec_offset = user_offset_ms;
     let exec_mute_sfx = mute_sfx;
     let exec_sfx_volume = sfx_volume;
     let exec_exe =
         std::env::current_exe().map_err(|e| Error::Config(format!("current_exe: {e}")))?;
 
-    // Load best scores per entry once up front, keyed by global index into
-    // the paginator's full item list. Missing book = all None.
-    let book = ScoreBook::load_default().unwrap_or_else(|e| {
-        tracing::warn!(
-            target: "juballer::rhythm::picker",
-            "score book load failed: {e}"
-        );
-        ScoreBook::new()
-    });
+    // Best-score-per-tile lookup, keyed by global index into the
+    // paginator's full item list. Missing book = all None.
     let best_scores: Vec<Option<u64>> = (0..paginator.total())
         .map(|i| {
             let e = paginator.items_on_page(i / CHART_CELLS_PER_PAGE);
@@ -1037,7 +1047,13 @@ pub fn pick(
                                 if !now_fav
                                     && matches!(view.favorite_filter, FavoriteFilter::OnlyFavs)
                                 {
-                                    paginator = build_paginator(&all_entries, &view, &favs);
+                                    paginator = build_paginator(
+                                        &all_entries,
+                                        &view,
+                                        &favs,
+                                        &book,
+                                        &exec_default_diff,
+                                    );
                                     state = PickerState::default();
                                 }
                             }
@@ -1057,7 +1073,13 @@ pub fn pick(
                             FilterAction::Stay => {}
                             FilterAction::Apply => {
                                 let _ = view.save_default();
-                                paginator = build_paginator(&all_entries, &view, &favs);
+                                paginator = build_paginator(
+                                    &all_entries,
+                                    &view,
+                                    &favs,
+                                    &book,
+                                    &exec_default_diff,
+                                );
                                 drop(preview.take());
                                 state = PickerState::default();
                                 mode = PickerMode::Browse;
