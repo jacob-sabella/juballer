@@ -92,6 +92,72 @@ where
     }
 }
 
+/// Stage-2 helper: handed to a draw closure that wants to request a
+/// mode switch / exit without authoring a `Mode` struct. The closure
+/// pokes the switcher at most once per frame; the wrapper returns
+/// whatever the closure last requested, or `Continue` if it didn't.
+///
+/// Lets existing big closure-based modes (the rhythm picker, the
+/// rhythm play loop, the deck event loop) opt into in-process
+/// switching without restructuring as a struct + impl. They migrate
+/// to a real `Mode` impl over time as the closures slim down.
+pub struct Switcher {
+    next: Option<ModeOutcome>,
+}
+
+impl Switcher {
+    fn new() -> Self {
+        Self { next: None }
+    }
+
+    /// Ask the App driver to exit on the next frame boundary.
+    pub fn exit(&mut self) {
+        self.next = Some(ModeOutcome::Exit);
+    }
+
+    /// Ask the App driver to swap in a different mode after this
+    /// frame. The current mode drops on the way out.
+    pub fn switch_to<M: Mode + 'static>(&mut self, mode: M) {
+        self.next = Some(ModeOutcome::SwitchTo(Box::new(mode)));
+    }
+
+    /// Same as [`Self::switch_to`] but accepts a pre-boxed mode —
+    /// useful when the caller already has a `Box<dyn Mode>` in hand.
+    pub fn switch_to_boxed(&mut self, mode: Box<dyn Mode>) {
+        self.next = Some(ModeOutcome::SwitchTo(mode));
+    }
+
+    fn take_outcome(&mut self) -> ModeOutcome {
+        self.next.take().unwrap_or(ModeOutcome::Continue)
+    }
+}
+
+/// Wrap a draw closure that reaches a [`Switcher`] each frame as a
+/// boxed [`Mode`]. The closure can request `exit()` / `switch_to()`
+/// at any point; the App driver sees the resulting `ModeOutcome`.
+pub fn closure_mode_with_switcher<F>(draw: F) -> Box<dyn Mode>
+where
+    F: FnMut(&mut Frame<'_>, &[Event], &mut Switcher) + 'static,
+{
+    struct WithSwitcher<F>
+    where
+        F: FnMut(&mut Frame<'_>, &[Event], &mut Switcher),
+    {
+        draw: F,
+    }
+    impl<F> Mode for WithSwitcher<F>
+    where
+        F: FnMut(&mut Frame<'_>, &[Event], &mut Switcher),
+    {
+        fn frame(&mut self, frame: &mut Frame<'_>, events: &[Event]) -> ModeOutcome {
+            let mut sw = Switcher::new();
+            (self.draw)(frame, events, &mut sw);
+            sw.take_outcome()
+        }
+    }
+    Box::new(WithSwitcher { draw })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -897,151 +897,178 @@ pub fn pick(
     let boot = std::time::Instant::now();
     let mut last_frame = std::time::Instant::now();
 
-    app.run(move |frame, events| {
-        // Advance any active page transition so finished animations clear
-        // cleanly before we process new input.
-        paginator.tick();
-        // Async preview: pull-poll the worker thread; flips Loading →
-        // Playing the moment a buffer arrives. No-op when there's no
-        // preview or the sink is already playing.
-        if let Some(p) = preview.as_mut() {
-            p.poll();
-        }
-
-        let current_entries = paginator.current_items().to_vec();
-        // Per-tile best score for the active difficulty. Looked up
-        // fresh from the score book each frame (HashMap, ~O(12) per
-        // paint) so filter/sort changes are reflected immediately —
-        // the previously-cached best_scores Vec went stale on every
-        // paginator rebuild because its indices were positional.
-        let page_best_scores: Vec<Option<u64>> = current_entries
-            .iter()
-            .map(|e| book.best(&e.path, &exec_default_diff).map(|r| r.score))
-            .collect();
-
-        paint_backgrounds(
-            frame,
-            &current_entries,
-            state.focused,
-            paginator.current_page(),
-            paginator.page_count(),
-        );
-
-        // Background for the picker's top-region preview header. Picks
-        // from the user's `backgrounds` list using the focused chart's
-        // path when something is focused, else the first entry's path
-        // as a stable idle state. Shader / image mode split mirrors
-        // play_chart_inner's handling — shader goes raw into the top
-        // rect, image paints inside draw_overlay via bg_img_cache.
-        // Hash the audio path, not the chart path: gameplay
-        // (rhythm/mod.rs) keys `pick_for_chart` on `state.chart.audio_path`,
-        // so the picker preview must do the same or the shader you see
-        // hovering an entry won't match what you get once the song starts.
-        let bg_key_path = state
-            .focused
-            .and_then(|i| current_entries.get(i))
-            .map(|e| e.audio_path.clone())
-            .or_else(|| backgrounds.first().cloned());
-        let background = bg_key_path
-            .as_deref()
-            .and_then(|p| super::background::pick_for_chart(p, &backgrounds, background_index));
-        let boot_secs = boot.elapsed().as_secs_f32();
-        let dt = {
-            let now = std::time::Instant::now();
-            let d = now.duration_since(last_frame).as_secs_f32();
-            last_frame = now;
-            d
-        };
-        let focused_entry = state.focused.and_then(|i| current_entries.get(i));
-        let bg_inputs = super::background::BackgroundInputs {
-            bpm: focused_entry.map(|e| e.bpm).unwrap_or(120.0),
-            // Live FFT of whatever the preview sink is playing; zero-
-            // filled when no preview is active. Same plumbing as the
-            // gameplay loop — the shader gets real audio bins, not the
-            // synth fallback.
-            spectrum: preview_spectrum.snapshot(),
-            ..Default::default()
-        };
-        if let Some(bg) = &background {
-            if matches!(bg, super::background::Background::Shader(_)) {
-                let top_rect = frame.top_region_rect();
-                super::background::draw_shader(
-                    frame,
-                    bg,
-                    top_rect,
-                    bg_inputs,
-                    &mut shader_cache,
-                    boot_secs,
-                    dt,
-                );
+    app.run_modes(juballer_core::closure_mode_with_switcher(
+        move |frame, events, switcher| {
+            // Advance any active page transition so finished animations clear
+            // cleanly before we process new input.
+            paginator.tick();
+            // Async preview: pull-poll the worker thread; flips Loading →
+            // Playing the moment a buffer arrives. No-op when there's no
+            // preview or the sink is already playing.
+            if let Some(p) = preview.as_mut() {
+                p.poll();
             }
-        }
 
-        // Browse vs Filter mode: each draws its own grid. They never
-        // both run in the same frame — Filter completely replaces the
-        // chart-cell layout, no scrim/overlay shenanigans, the
-        // background shader keeps rendering underneath either way.
-        match mode {
-            PickerMode::Browse => draw_overlay(
+            let current_entries = paginator.current_items().to_vec();
+            // Per-tile best score for the active difficulty. Looked up
+            // fresh from the score book each frame (HashMap, ~O(12) per
+            // paint) so filter/sort changes are reflected immediately —
+            // the previously-cached best_scores Vec went stale on every
+            // paginator rebuild because its indices were positional.
+            let page_best_scores: Vec<Option<u64>> = current_entries
+                .iter()
+                .map(|e| book.best(&e.path, &exec_default_diff).map(|r| r.score))
+                .collect();
+
+            paint_backgrounds(
                 frame,
-                &mut overlay,
                 &current_entries,
-                state,
-                &page_best_scores,
-                &mut jackets,
+                state.focused,
                 paginator.current_page(),
                 paginator.page_count(),
-                paginator.transition().copied(),
-                background.clone(),
-                &mut bg_img_cache,
-                &favs,
-                fav_toast,
-            ),
-            PickerMode::Filter => {
-                draw_filter_overlay(frame, &mut overlay, &view, &all_packs);
-            }
-        }
+            );
 
-        // Per-frame hold tick — fires the hold action the instant the
-        // press timer crosses HOLD_THRESHOLD_MS so the screen flips
-        // *while* the player is still holding (rather than on release,
-        // which felt laggy and unresponsive).
-        let hold_threshold = Duration::from_millis(HOLD_THRESHOLD_MS);
-        if mode == PickerMode::Browse {
-            if !prev_hold_fired {
-                if let Some(t0) = prev_held_at {
-                    if t0.elapsed() >= hold_threshold {
-                        prev_hold_fired = true;
-                        tracing::info!(target: "juballer::rhythm::picker",
-                            "PREV hold → entering Filter mode");
-                        mode = PickerMode::Filter;
-                    }
+            // Background for the picker's top-region preview header. Picks
+            // from the user's `backgrounds` list using the focused chart's
+            // path when something is focused, else the first entry's path
+            // as a stable idle state. Shader / image mode split mirrors
+            // play_chart_inner's handling — shader goes raw into the top
+            // rect, image paints inside draw_overlay via bg_img_cache.
+            // Hash the audio path, not the chart path: gameplay
+            // (rhythm/mod.rs) keys `pick_for_chart` on `state.chart.audio_path`,
+            // so the picker preview must do the same or the shader you see
+            // hovering an entry won't match what you get once the song starts.
+            let bg_key_path = state
+                .focused
+                .and_then(|i| current_entries.get(i))
+                .map(|e| e.audio_path.clone())
+                .or_else(|| backgrounds.first().cloned());
+            let background = bg_key_path
+                .as_deref()
+                .and_then(|p| super::background::pick_for_chart(p, &backgrounds, background_index));
+            let boot_secs = boot.elapsed().as_secs_f32();
+            let dt = {
+                let now = std::time::Instant::now();
+                let d = now.duration_since(last_frame).as_secs_f32();
+                last_frame = now;
+                d
+            };
+            let focused_entry = state.focused.and_then(|i| current_entries.get(i));
+            let bg_inputs = super::background::BackgroundInputs {
+                bpm: focused_entry.map(|e| e.bpm).unwrap_or(120.0),
+                // Live FFT of whatever the preview sink is playing; zero-
+                // filled when no preview is active. Same plumbing as the
+                // gameplay loop — the shader gets real audio bins, not the
+                // synth fallback.
+                spectrum: preview_spectrum.snapshot(),
+                ..Default::default()
+            };
+            if let Some(bg) = &background {
+                if matches!(bg, super::background::Background::Shader(_)) {
+                    let top_rect = frame.top_region_rect();
+                    super::background::draw_shader(
+                        frame,
+                        bg,
+                        top_rect,
+                        bg_inputs,
+                        &mut shader_cache,
+                        boot_secs,
+                        dt,
+                    );
                 }
             }
-            // Chart-tile hold → toggle favorite. Short tap already did
-            // whatever it does (focus / launch) on KeyDown; this fires
-            // additionally after HOLD_THRESHOLD_MS, feeling like a
-            // separate gesture on the same cell.
-            if !chart_hold_fired {
-                if let Some((r, c, t0)) = chart_held_at {
-                    if t0.elapsed() >= hold_threshold {
-                        chart_hold_fired = true;
-                        let cell_idx = (r as usize) * 4 + (c as usize);
-                        if cell_idx < CHART_CELLS_PER_PAGE {
-                            if let Some(entry) = current_entries.get(cell_idx) {
-                                let now_fav = favs.toggle(&entry.path);
-                                if let Err(e) = favs.save_default() {
-                                    tracing::warn!(target: "juballer::rhythm::picker",
+
+            // Browse vs Filter mode: each draws its own grid. They never
+            // both run in the same frame — Filter completely replaces the
+            // chart-cell layout, no scrim/overlay shenanigans, the
+            // background shader keeps rendering underneath either way.
+            match mode {
+                PickerMode::Browse => draw_overlay(
+                    frame,
+                    &mut overlay,
+                    &current_entries,
+                    state,
+                    &page_best_scores,
+                    &mut jackets,
+                    paginator.current_page(),
+                    paginator.page_count(),
+                    paginator.transition().copied(),
+                    background.clone(),
+                    &mut bg_img_cache,
+                    &favs,
+                    fav_toast,
+                ),
+                PickerMode::Filter => {
+                    draw_filter_overlay(frame, &mut overlay, &view, &all_packs);
+                }
+            }
+
+            // Per-frame hold tick — fires the hold action the instant the
+            // press timer crosses HOLD_THRESHOLD_MS so the screen flips
+            // *while* the player is still holding (rather than on release,
+            // which felt laggy and unresponsive).
+            let hold_threshold = Duration::from_millis(HOLD_THRESHOLD_MS);
+            if mode == PickerMode::Browse {
+                if !prev_hold_fired {
+                    if let Some(t0) = prev_held_at {
+                        if t0.elapsed() >= hold_threshold {
+                            prev_hold_fired = true;
+                            tracing::info!(target: "juballer::rhythm::picker",
+                            "PREV hold → entering Filter mode");
+                            mode = PickerMode::Filter;
+                        }
+                    }
+                }
+                // Chart-tile hold → toggle favorite. Short tap already did
+                // whatever it does (focus / launch) on KeyDown; this fires
+                // additionally after HOLD_THRESHOLD_MS, feeling like a
+                // separate gesture on the same cell.
+                if !chart_hold_fired {
+                    if let Some((r, c, t0)) = chart_held_at {
+                        if t0.elapsed() >= hold_threshold {
+                            chart_hold_fired = true;
+                            let cell_idx = (r as usize) * 4 + (c as usize);
+                            if cell_idx < CHART_CELLS_PER_PAGE {
+                                if let Some(entry) = current_entries.get(cell_idx) {
+                                    let now_fav = favs.toggle(&entry.path);
+                                    if let Err(e) = favs.save_default() {
+                                        tracing::warn!(target: "juballer::rhythm::picker",
                                         "favorites save failed: {e}");
-                                }
-                                fav_toast = Some((Instant::now(), now_fav));
-                                tracing::info!(target: "juballer::rhythm::picker",
+                                    }
+                                    fav_toast = Some((Instant::now(), now_fav));
+                                    tracing::info!(target: "juballer::rhythm::picker",
                                     "favorite {} → {}",
                                     entry.path.display(),
                                     if now_fav { "added" } else { "removed" });
-                                if !now_fav
-                                    && matches!(view.favorite_filter, FavoriteFilter::OnlyFavs)
-                                {
+                                    if !now_fav
+                                        && matches!(view.favorite_filter, FavoriteFilter::OnlyFavs)
+                                    {
+                                        paginator = build_paginator(
+                                            &all_entries,
+                                            &view,
+                                            &favs,
+                                            &book,
+                                            &exec_default_diff,
+                                        );
+                                        state = PickerState::default();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            for ev in events {
+                match ev {
+                    Event::KeyDown { row, col, .. } => {
+                        let idx = (*row as usize) * 4 + (*col as usize);
+                        // ── Filter mode: route to the sub-screen handler.
+                        if mode == PickerMode::Filter {
+                            match handle_filter_press(*row, *col, &mut view, &all_packs) {
+                                FilterAction::Stay => {}
+                                FilterAction::Apply => {
+                                    let _ = view.save_default();
                                     paginator = build_paginator(
                                         &all_entries,
                                         &view,
@@ -1049,334 +1076,328 @@ pub fn pick(
                                         &book,
                                         &exec_default_diff,
                                     );
+                                    drop(preview.take());
                                     state = PickerState::default();
+                                    mode = PickerMode::Browse;
+                                }
+                                FilterAction::Back => {
+                                    view = PickerView::load_default().unwrap_or_default();
+                                    mode = PickerMode::Browse;
+                                }
+                                FilterAction::Reset => {
+                                    view = PickerView::default();
+                                }
+                                FilterAction::Exit => {
+                                    drop(preview.take());
+                                    {
+                                        switcher.exit();
+                                        return;
+                                    }
                                 }
                             }
+                            continue;
                         }
-                    }
-                }
-            }
-        }
-
-        for ev in events {
-            match ev {
-                Event::KeyDown { row, col, .. } => {
-                    let idx = (*row as usize) * 4 + (*col as usize);
-                    // ── Filter mode: route to the sub-screen handler.
-                    if mode == PickerMode::Filter {
-                        match handle_filter_press(*row, *col, &mut view, &all_packs) {
-                            FilterAction::Stay => {}
-                            FilterAction::Apply => {
-                                let _ = view.save_default();
-                                paginator = build_paginator(
-                                    &all_entries,
-                                    &view,
-                                    &favs,
-                                    &book,
-                                    &exec_default_diff,
-                                );
-                                drop(preview.take());
-                                state = PickerState::default();
-                                mode = PickerMode::Browse;
-                            }
-                            FilterAction::Back => {
-                                view = PickerView::load_default().unwrap_or_default();
-                                mode = PickerMode::Browse;
-                            }
-                            FilterAction::Reset => {
-                                view = PickerView::default();
-                            }
-                            FilterAction::Exit => {
-                                drop(preview.take());
-                                super::exit::exit(0);
-                            }
+                        // ── Browse mode: PREV starts a hold timer (enter
+                        // filter mode on ≥500 ms hold). NEXT is tap-only
+                        // (page nav). Chart cells also start a hold timer
+                        // for favorite toggle.
+                        if idx == PREV_CELL_IDX {
+                            prev_held_at = Some(Instant::now());
+                            prev_hold_fired = false;
+                            continue;
                         }
-                        continue;
-                    }
-                    // ── Browse mode: PREV starts a hold timer (enter
-                    // filter mode on ≥500 ms hold). NEXT is tap-only
-                    // (page nav). Chart cells also start a hold timer
-                    // for favorite toggle.
-                    if idx == PREV_CELL_IDX {
-                        prev_held_at = Some(Instant::now());
-                        prev_hold_fired = false;
-                        continue;
-                    }
-                    if idx == NEXT_CELL_IDX {
-                        let from = paginator.current_page();
-                        let started =
-                            paginator.next_page(crate::rhythm::pagination::DEFAULT_TRANSITION_MS);
-                        tracing::info!(
-                            target: "juballer::rhythm::picker",
-                            "NEXT tap: from={from} started={started} → page={}",
-                            paginator.current_page()
-                        );
-                        if started {
-                            drop(preview.take());
-                            state = PickerState::default();
-                        }
-                        continue;
-                    }
-                    // Chart cell: start hold timer ONLY. The
-                    // focus/cycle action is deferred to KeyUp so a
-                    // long-press for favorite doesn't *also* flip the
-                    // selection. PLAY (3,2) + EXIT (3,3) still fire on
-                    // KeyDown — they're not held for any alt action.
-                    if idx < CHART_CELLS_PER_PAGE {
-                        chart_held_at = Some((*row, *col, Instant::now()));
-                        chart_hold_fired = false;
-                        continue;
-                    }
-                    let diff_count =
-                        |i: usize| current_entries.get(i).map(|e| e.difficulties.len());
-                    let (action, next_state) = press_cell(state, *row, *col, diff_count);
-                    state = next_state;
-                    match action {
-                        PickerAction::Exit => {
-                            // Dropping `preview` before exit stops the audio
-                            // callback thread cleanly; `std::process::exit`
-                            // otherwise bypasses destructors.
-                            drop(preview.take());
-                            super::exit::exit(0);
-                        }
-                        PickerAction::Ignore => {
-                            // No-op: empty cell, orphan PLAY, etc.
-                        }
-                        PickerAction::Cycle => {
-                            if let Some(fidx) = state.focused {
-                                if let Some(entry) = current_entries.get(fidx) {
-                                    let diff = entry
-                                        .difficulties
-                                        .get(state.selected_diff_idx)
-                                        .map(String::as_str)
-                                        .unwrap_or("?");
-                                    tracing::info!(
-                                        target: "juballer::rhythm::picker",
-                                        "cycled [{}] {} → difficulty [{}] {}",
-                                        fidx,
-                                        entry.path.display(),
-                                        state.selected_diff_idx,
-                                        diff,
-                                    );
-                                }
-                            }
-                        }
-                        PickerAction::Focus { idx } => {
-                            let entry = match current_entries.get(idx) {
-                                Some(e) => e,
-                                None => continue,
-                            };
-                            // Drop the previous player first so the outgoing
-                            // sink stops immediately. PreviewPlayer::start
-                            // is async — returns instantly; audio comes in
-                            // once the worker thread finishes decoding
-                            // (~50-150 ms typical).
-                            drop(preview.take());
-                            preview = Some(PreviewPlayer::start(
-                                &entry.audio_path,
-                                entry.preview,
-                                Some(preview_spectrum.clone()),
-                                preview_handle.clone(),
-                            ));
-                            tracing::info!(
-                                target: "juballer::rhythm::picker",
-                                "focused [{}] {} — preview decoding",
-                                idx,
-                                entry.path.display()
-                            );
-                        }
-                        PickerAction::Launch { idx, diff_idx } => {
-                            let entry = match current_entries.get(idx) {
-                                Some(e) => e,
-                                None => continue,
-                            };
-                            // Drop preview before exec so the audio fd isn't
-                            // inherited by the replacement process.
-                            drop(preview.take());
-                            let diff = entry
-                                .difficulties
-                                .get(diff_idx)
-                                .cloned()
-                                .unwrap_or_else(|| exec_default_diff.clone());
-                            tracing::info!(
-                                target: "juballer::rhythm::picker",
-                                "selected [{}] {} @ {}",
-                                idx,
-                                entry.path.display(),
-                                diff,
-                            );
-                            // exec() replaces the process — nothing to clean
-                            // up after this call returns (which on success
-                            // it won't).
-                            //
-                            // Override the inherited RETURN_TO env so the
-                            // song's exit lands back in the picker (this
-                            // very pick() invocation, freshly re-exec'd)
-                            // with the same chart pre-focused. Pre-focus
-                            // is wired via JUBALLER_LAST_CHART, read at
-                            // picker init.
-                            let mut cmd = std::process::Command::new(&exec_exe);
-                            cmd.arg("play")
-                                .arg(&entry.path)
-                                .arg("--difficulty")
-                                .arg(&diff)
-                                .arg("--audio-offset-ms")
-                                .arg(exec_offset.to_string())
-                                .env("JUBALLER_RETURN_TO", "picker")
-                                .env("JUBALLER_LAST_CHART", entry.path.to_string_lossy().as_ref());
-                            if exec_mute_sfx {
-                                cmd.arg("--mute-sfx");
-                            }
-                            if let Some(v) = exec_sfx_volume {
-                                cmd.arg("--sfx-volume").arg(format!("{v}"));
-                            }
-                            relaunch_or_exit(cmd, "exec failed");
-                        }
-                    }
-                }
-                Event::KeyUp { row, col, .. } => {
-                    let idx = (*row as usize) * 4 + (*col as usize);
-                    if idx == PREV_CELL_IDX {
-                        let was_pressed = prev_held_at.take().is_some();
-                        let fired = prev_hold_fired;
-                        prev_hold_fired = false;
-                        // Hold already fired on the per-frame tick — the
-                        // KeyUp is just cleanup. Otherwise (short tap)
-                        // do the page nav now.
-                        if was_pressed && !fired && mode == PickerMode::Browse {
+                        if idx == NEXT_CELL_IDX {
                             let from = paginator.current_page();
                             let started = paginator
-                                .prev_page(crate::rhythm::pagination::DEFAULT_TRANSITION_MS);
+                                .next_page(crate::rhythm::pagination::DEFAULT_TRANSITION_MS);
                             tracing::info!(
                                 target: "juballer::rhythm::picker",
-                                "PREV tap: from={from} started={started} → page={}",
+                                "NEXT tap: from={from} started={started} → page={}",
                                 paginator.current_page()
                             );
                             if started {
                                 drop(preview.take());
                                 state = PickerState::default();
                             }
+                            continue;
                         }
-                        continue;
-                    }
-                    // Chart cell release. If the hold action (favorite
-                    // toggle) didn't fire, this was a short tap → run
-                    // the focus/cycle dispatch now. Otherwise we were
-                    // holding for fav and the tap should NOT also flip
-                    // the selection.
-                    if idx < CHART_CELLS_PER_PAGE {
-                        let was_held = chart_held_at.take().is_some();
-                        let fired = chart_hold_fired;
-                        chart_hold_fired = false;
-                        if was_held && !fired {
-                            // Same dispatch as the KeyDown PLAY/EXIT
-                            // branch — duplicated inline because
-                            // PickerAction::Launch's exec() and
-                            // PickerAction::Exit's process replacement
-                            // are divergent calls that can't easily be
-                            // factored into a closure that returns.
-                            let diff_count =
-                                |i: usize| current_entries.get(i).map(|e| e.difficulties.len());
-                            let (action, next_state) = press_cell(state, *row, *col, diff_count);
-                            state = next_state;
-                            match action {
-                                PickerAction::Exit => {
-                                    drop(preview.take());
-                                    super::exit::exit(0);
+                        // Chart cell: start hold timer ONLY. The
+                        // focus/cycle action is deferred to KeyUp so a
+                        // long-press for favorite doesn't *also* flip the
+                        // selection. PLAY (3,2) + EXIT (3,3) still fire on
+                        // KeyDown — they're not held for any alt action.
+                        if idx < CHART_CELLS_PER_PAGE {
+                            chart_held_at = Some((*row, *col, Instant::now()));
+                            chart_hold_fired = false;
+                            continue;
+                        }
+                        let diff_count =
+                            |i: usize| current_entries.get(i).map(|e| e.difficulties.len());
+                        let (action, next_state) = press_cell(state, *row, *col, diff_count);
+                        state = next_state;
+                        match action {
+                            PickerAction::Exit => {
+                                // Dropping `preview` before exit stops the audio
+                                // callback thread cleanly; `std::process::exit`
+                                // otherwise bypasses destructors.
+                                drop(preview.take());
+                                {
+                                    switcher.exit();
+                                    return;
                                 }
-                                PickerAction::Ignore => {}
-                                PickerAction::Cycle => {
-                                    if let Some(fidx) = state.focused {
-                                        if let Some(entry) = current_entries.get(fidx) {
-                                            let diff = entry
-                                                .difficulties
-                                                .get(state.selected_diff_idx)
-                                                .map(String::as_str)
-                                                .unwrap_or("?");
-                                            tracing::info!(
-                                                target: "juballer::rhythm::picker",
-                                                "cycled [{}] {} → difficulty [{}] {}",
-                                                fidx,
-                                                entry.path.display(),
-                                                state.selected_diff_idx,
-                                                diff,
-                                            );
+                            }
+                            PickerAction::Ignore => {
+                                // No-op: empty cell, orphan PLAY, etc.
+                            }
+                            PickerAction::Cycle => {
+                                if let Some(fidx) = state.focused {
+                                    if let Some(entry) = current_entries.get(fidx) {
+                                        let diff = entry
+                                            .difficulties
+                                            .get(state.selected_diff_idx)
+                                            .map(String::as_str)
+                                            .unwrap_or("?");
+                                        tracing::info!(
+                                            target: "juballer::rhythm::picker",
+                                            "cycled [{}] {} → difficulty [{}] {}",
+                                            fidx,
+                                            entry.path.display(),
+                                            state.selected_diff_idx,
+                                            diff,
+                                        );
+                                    }
+                                }
+                            }
+                            PickerAction::Focus { idx } => {
+                                let entry = match current_entries.get(idx) {
+                                    Some(e) => e,
+                                    None => continue,
+                                };
+                                // Drop the previous player first so the outgoing
+                                // sink stops immediately. PreviewPlayer::start
+                                // is async — returns instantly; audio comes in
+                                // once the worker thread finishes decoding
+                                // (~50-150 ms typical).
+                                drop(preview.take());
+                                preview = Some(PreviewPlayer::start(
+                                    &entry.audio_path,
+                                    entry.preview,
+                                    Some(preview_spectrum.clone()),
+                                    preview_handle.clone(),
+                                ));
+                                tracing::info!(
+                                    target: "juballer::rhythm::picker",
+                                    "focused [{}] {} — preview decoding",
+                                    idx,
+                                    entry.path.display()
+                                );
+                            }
+                            PickerAction::Launch { idx, diff_idx } => {
+                                let entry = match current_entries.get(idx) {
+                                    Some(e) => e,
+                                    None => continue,
+                                };
+                                // Drop preview before exec so the audio fd isn't
+                                // inherited by the replacement process.
+                                drop(preview.take());
+                                let diff = entry
+                                    .difficulties
+                                    .get(diff_idx)
+                                    .cloned()
+                                    .unwrap_or_else(|| exec_default_diff.clone());
+                                tracing::info!(
+                                    target: "juballer::rhythm::picker",
+                                    "selected [{}] {} @ {}",
+                                    idx,
+                                    entry.path.display(),
+                                    diff,
+                                );
+                                // exec() replaces the process — nothing to clean
+                                // up after this call returns (which on success
+                                // it won't).
+                                //
+                                // Override the inherited RETURN_TO env so the
+                                // song's exit lands back in the picker (this
+                                // very pick() invocation, freshly re-exec'd)
+                                // with the same chart pre-focused. Pre-focus
+                                // is wired via JUBALLER_LAST_CHART, read at
+                                // picker init.
+                                let mut cmd = std::process::Command::new(&exec_exe);
+                                cmd.arg("play")
+                                    .arg(&entry.path)
+                                    .arg("--difficulty")
+                                    .arg(&diff)
+                                    .arg("--audio-offset-ms")
+                                    .arg(exec_offset.to_string())
+                                    .env("JUBALLER_RETURN_TO", "picker")
+                                    .env(
+                                        "JUBALLER_LAST_CHART",
+                                        entry.path.to_string_lossy().as_ref(),
+                                    );
+                                if exec_mute_sfx {
+                                    cmd.arg("--mute-sfx");
+                                }
+                                if let Some(v) = exec_sfx_volume {
+                                    cmd.arg("--sfx-volume").arg(format!("{v}"));
+                                }
+                                relaunch_or_exit(cmd, "exec failed");
+                            }
+                        }
+                    }
+                    Event::KeyUp { row, col, .. } => {
+                        let idx = (*row as usize) * 4 + (*col as usize);
+                        if idx == PREV_CELL_IDX {
+                            let was_pressed = prev_held_at.take().is_some();
+                            let fired = prev_hold_fired;
+                            prev_hold_fired = false;
+                            // Hold already fired on the per-frame tick — the
+                            // KeyUp is just cleanup. Otherwise (short tap)
+                            // do the page nav now.
+                            if was_pressed && !fired && mode == PickerMode::Browse {
+                                let from = paginator.current_page();
+                                let started = paginator
+                                    .prev_page(crate::rhythm::pagination::DEFAULT_TRANSITION_MS);
+                                tracing::info!(
+                                    target: "juballer::rhythm::picker",
+                                    "PREV tap: from={from} started={started} → page={}",
+                                    paginator.current_page()
+                                );
+                                if started {
+                                    drop(preview.take());
+                                    state = PickerState::default();
+                                }
+                            }
+                            continue;
+                        }
+                        // Chart cell release. If the hold action (favorite
+                        // toggle) didn't fire, this was a short tap → run
+                        // the focus/cycle dispatch now. Otherwise we were
+                        // holding for fav and the tap should NOT also flip
+                        // the selection.
+                        if idx < CHART_CELLS_PER_PAGE {
+                            let was_held = chart_held_at.take().is_some();
+                            let fired = chart_hold_fired;
+                            chart_hold_fired = false;
+                            if was_held && !fired {
+                                // Same dispatch as the KeyDown PLAY/EXIT
+                                // branch — duplicated inline because
+                                // PickerAction::Launch's exec() and
+                                // PickerAction::Exit's process replacement
+                                // are divergent calls that can't easily be
+                                // factored into a closure that returns.
+                                let diff_count =
+                                    |i: usize| current_entries.get(i).map(|e| e.difficulties.len());
+                                let (action, next_state) =
+                                    press_cell(state, *row, *col, diff_count);
+                                state = next_state;
+                                match action {
+                                    PickerAction::Exit => {
+                                        drop(preview.take());
+                                        {
+                                            switcher.exit();
+                                            return;
                                         }
                                     }
-                                }
-                                PickerAction::Focus { idx } => {
-                                    let entry = match current_entries.get(idx) {
-                                        Some(e) => e,
-                                        None => continue,
-                                    };
-                                    drop(preview.take());
-                                    preview = Some(PreviewPlayer::start(
-                                        &entry.audio_path,
-                                        entry.preview,
-                                        Some(preview_spectrum.clone()),
-                                        preview_handle.clone(),
-                                    ));
-                                    tracing::info!(
-                                        target: "juballer::rhythm::picker",
-                                        "focused [{}] {} — preview decoding",
-                                        idx,
-                                        entry.path.display()
-                                    );
-                                }
-                                PickerAction::Launch { idx, diff_idx } => {
-                                    let entry = match current_entries.get(idx) {
-                                        Some(e) => e,
-                                        None => continue,
-                                    };
-                                    drop(preview.take());
-                                    let diff = entry
-                                        .difficulties
-                                        .get(diff_idx)
-                                        .cloned()
-                                        .unwrap_or_else(|| exec_default_diff.clone());
-                                    tracing::info!(
-                                        target: "juballer::rhythm::picker",
-                                        "selected [{}] {} @ {}",
-                                        idx,
-                                        entry.path.display(),
-                                        diff,
-                                    );
-                                    let mut cmd = std::process::Command::new(&exec_exe);
-                                    cmd.arg("play")
-                                        .arg(&entry.path)
-                                        .arg("--difficulty")
-                                        .arg(&diff)
-                                        .arg("--audio-offset-ms")
-                                        .arg(exec_offset.to_string())
-                                        .env("JUBALLER_RETURN_TO", "picker")
-                                        .env(
-                                            "JUBALLER_LAST_CHART",
-                                            entry.path.to_string_lossy().as_ref(),
+                                    PickerAction::Ignore => {}
+                                    PickerAction::Cycle => {
+                                        if let Some(fidx) = state.focused {
+                                            if let Some(entry) = current_entries.get(fidx) {
+                                                let diff = entry
+                                                    .difficulties
+                                                    .get(state.selected_diff_idx)
+                                                    .map(String::as_str)
+                                                    .unwrap_or("?");
+                                                tracing::info!(
+                                                    target: "juballer::rhythm::picker",
+                                                    "cycled [{}] {} → difficulty [{}] {}",
+                                                    fidx,
+                                                    entry.path.display(),
+                                                    state.selected_diff_idx,
+                                                    diff,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    PickerAction::Focus { idx } => {
+                                        let entry = match current_entries.get(idx) {
+                                            Some(e) => e,
+                                            None => continue,
+                                        };
+                                        drop(preview.take());
+                                        preview = Some(PreviewPlayer::start(
+                                            &entry.audio_path,
+                                            entry.preview,
+                                            Some(preview_spectrum.clone()),
+                                            preview_handle.clone(),
+                                        ));
+                                        tracing::info!(
+                                            target: "juballer::rhythm::picker",
+                                            "focused [{}] {} — preview decoding",
+                                            idx,
+                                            entry.path.display()
                                         );
-                                    if exec_mute_sfx {
-                                        cmd.arg("--mute-sfx");
                                     }
-                                    if let Some(v) = exec_sfx_volume {
-                                        cmd.arg("--sfx-volume").arg(format!("{v}"));
+                                    PickerAction::Launch { idx, diff_idx } => {
+                                        let entry = match current_entries.get(idx) {
+                                            Some(e) => e,
+                                            None => continue,
+                                        };
+                                        drop(preview.take());
+                                        let diff = entry
+                                            .difficulties
+                                            .get(diff_idx)
+                                            .cloned()
+                                            .unwrap_or_else(|| exec_default_diff.clone());
+                                        tracing::info!(
+                                            target: "juballer::rhythm::picker",
+                                            "selected [{}] {} @ {}",
+                                            idx,
+                                            entry.path.display(),
+                                            diff,
+                                        );
+                                        let mut cmd = std::process::Command::new(&exec_exe);
+                                        cmd.arg("play")
+                                            .arg(&entry.path)
+                                            .arg("--difficulty")
+                                            .arg(&diff)
+                                            .arg("--audio-offset-ms")
+                                            .arg(exec_offset.to_string())
+                                            .env("JUBALLER_RETURN_TO", "picker")
+                                            .env(
+                                                "JUBALLER_LAST_CHART",
+                                                entry.path.to_string_lossy().as_ref(),
+                                            );
+                                        if exec_mute_sfx {
+                                            cmd.arg("--mute-sfx");
+                                        }
+                                        if let Some(v) = exec_sfx_volume {
+                                            cmd.arg("--sfx-volume").arg(format!("{v}"));
+                                        }
+                                        relaunch_or_exit(cmd, "exec failed");
                                     }
-                                    relaunch_or_exit(cmd, "exec failed");
                                 }
                             }
                         }
                     }
+                    Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
+                        drop(preview.take());
+                        {
+                            switcher.exit();
+                            return;
+                        }
+                    }
+                    Event::Quit => {
+                        drop(preview.take());
+                        {
+                            switcher.exit();
+                            return;
+                        }
+                    }
+                    _ => {}
                 }
-                Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
-                    drop(preview.take());
-                    super::exit::exit(0);
-                }
-                Event::Quit => {
-                    drop(preview.take());
-                    super::exit::exit(0);
-                }
-                _ => {}
             }
-        }
-    })?;
+        },
+    ))?;
     Ok(())
 }
 

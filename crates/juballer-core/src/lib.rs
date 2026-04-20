@@ -13,7 +13,10 @@ pub mod render;
 mod types;
 pub mod ui;
 
-pub use app::{App, AppBuilder, Mode, ModeOutcome, PresentMode, RefreshTarget};
+pub use app::{
+    closure_mode_with_switcher, App, AppBuilder, Mode, ModeOutcome, PresentMode, RefreshTarget,
+    Switcher,
+};
 pub use calibration::Profile;
 pub use error::{Error, Result};
 pub use frame::{Frame, GpuCtx, RegionDraw, TileRawCtx};
