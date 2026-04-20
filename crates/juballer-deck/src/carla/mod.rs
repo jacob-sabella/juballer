@@ -140,7 +140,7 @@ pub fn run(path: &Path) -> Result<()> {
             render::draw_picker_overlay(frame, &mut overlay, p);
         } else {
             render::paint_backgrounds(frame, &state);
-            render::draw_overlay(frame, &mut overlay, &state, live_feed.as_ref());
+            render::draw_overlay(frame, &mut overlay, &state, live_feed.as_ref(), &names);
         }
 
         for ev in events {
@@ -189,6 +189,8 @@ pub fn run(path: &Path) -> Result<()> {
                                             target: "juballer::carla",
                                             "apply preset {preset_name:?}: {e}"
                                         );
+                                    } else if let Some(idx) = target {
+                                        state.record_active_preset(idx, entry.name());
                                     }
                                 } else {
                                     tracing::warn!(
@@ -433,6 +435,8 @@ fn handle_outcome(
                             target: "juballer::carla",
                             "apply preset {preset:?}: {e}"
                         );
+                    } else if let Some(idx) = plugin_idx {
+                        state.record_active_preset(idx, entry.name());
                     }
                 }
                 None => {

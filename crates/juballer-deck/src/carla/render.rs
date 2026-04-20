@@ -7,6 +7,7 @@
 
 use crate::carla::config::{ActionMode, Cell, DisplayBinding, DisplayMode, PluginRef};
 use crate::carla::listener::CarlaFeed;
+use crate::carla::names::NameMap;
 use crate::carla::picker::{
     self, PickerState, NAV_BACK_COL, NAV_EXIT_COL as PICKER_NAV_EXIT_COL,
     NAV_NEXT_COL as PICKER_NAV_NEXT_COL, NAV_PREV_COL as PICKER_NAV_PREV_COL,
@@ -119,6 +120,7 @@ pub fn draw_overlay(
     overlay: &mut EguiOverlay,
     state: &CarlaState,
     live_feed: Option<&Arc<RwLock<CarlaFeed>>>,
+    names: &NameMap,
 ) {
     let cell_rects = *frame.cell_rects();
     let top_rect = frame.top_region_rect();
@@ -133,8 +135,10 @@ pub fn draw_overlay(
     let breadcrumb = state.last_touched().map(|lt| {
         format!(
             "{} · {} = {:.3}",
-            display_ref(&lt.plugin),
-            display_ref(&lt.param),
+            display_ref_friendly(&lt.plugin, names),
+            // Param names are scoped per-plugin; we have the resolved
+            // plugin index in the breadcrumb's plugin ref already.
+            param_label(&lt.plugin, &lt.param, names),
             lt.value
         )
     });
@@ -182,8 +186,8 @@ pub fn draw_overlay(
             let rect = cell_rects[idx];
             let label = cell_label(cell);
             draw_cell_label(rc.ctx(), rect, &label);
-            if let (Some(disp), Some(feed)) = (cell.display.as_ref(), feed_snapshot.as_ref()) {
-                draw_display(rc.ctx(), rect, disp, feed);
+            if let Some(disp) = cell.display.as_ref() {
+                draw_display(rc.ctx(), rect, disp, feed_snapshot.as_ref(), state);
             }
         }
         // Nav-row labels.
@@ -219,13 +223,14 @@ fn draw_display(
     ctx: &egui::Context,
     rect: juballer_core::Rect,
     binding: &DisplayBinding,
-    feed: &FeedSnapshot,
+    feed: Option<&FeedSnapshot>,
+    state: &CarlaState,
 ) {
     let plugin = match binding.plugin.as_ref().and_then(plugin_ref_index) {
         Some(p) => p,
         None => return,
     };
-    let waiting = !feed.seen;
+    let waiting = feed.map_or(true, |f| !f.seen);
     let id = egui::Id::new(("carla_display", rect.x, rect.y));
     egui::Area::new(id)
         .fixed_pos(egui::pos2(
@@ -239,14 +244,22 @@ fn draw_display(
             let painter = ui.painter();
             let center = ui.max_rect().center();
             let (text, color) = match binding.mode {
-                DisplayMode::Tuner => render_tuner(binding, plugin, feed, waiting),
-                DisplayMode::Meter => render_meter(binding, plugin, feed, waiting, painter, &rect),
-                DisplayMode::Value => render_value(binding, plugin, feed, waiting),
-                DisplayMode::Text => render_value(binding, plugin, feed, waiting),
-                DisplayMode::ActivePresetName => (
-                    "preset…".to_string(),
-                    egui::Color32::from_rgb(140, 140, 160),
-                ),
+                DisplayMode::Tuner => match feed {
+                    Some(f) => render_tuner(binding, plugin, f, waiting),
+                    None => ("connecting…".into(), placeholder_colour()),
+                },
+                DisplayMode::Meter => match feed {
+                    Some(f) => render_meter(binding, plugin, f, waiting, painter, &rect),
+                    None => ("connecting…".into(), placeholder_colour()),
+                },
+                DisplayMode::Value | DisplayMode::Text => match feed {
+                    Some(f) => render_value(binding, plugin, f, waiting),
+                    None => ("connecting…".into(), placeholder_colour()),
+                },
+                DisplayMode::ActivePresetName => match state.active_preset(plugin) {
+                    Some(name) => (name.to_string(), value_colour()),
+                    None => ("—".to_string(), placeholder_colour()),
+                },
             };
             painter.text(
                 center,
@@ -624,6 +637,30 @@ fn display_ref(r: &PluginRef) -> String {
         PluginRef::Index(i) => format!("#{i}"),
         PluginRef::Name(n) => n.clone(),
     }
+}
+
+/// Same as [`display_ref`] but consults the NameMap for an index → name
+/// reverse lookup so the HUD reads `GxTuner` instead of `#1` once a
+/// `[carla].project` is configured.
+fn display_ref_friendly(r: &PluginRef, names: &NameMap) -> String {
+    match r {
+        PluginRef::Index(i) => names
+            .plugin_name_for(*i)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("#{i}")),
+        PluginRef::Name(n) => n.clone(),
+    }
+}
+
+/// Best-effort param label: tries the NameMap, falls back to a numeric
+/// index display when the resolved plugin isn't known to the map.
+fn param_label(plugin: &PluginRef, param: &PluginRef, names: &NameMap) -> String {
+    if let (PluginRef::Index(plug), PluginRef::Index(p)) = (plugin, param) {
+        if let Some(name) = names.param_name_for(*plug, *p) {
+            return name.to_owned();
+        }
+    }
+    display_ref(param)
 }
 
 #[allow(clippy::too_many_arguments)]

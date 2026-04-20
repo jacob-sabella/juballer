@@ -86,6 +86,28 @@ impl NameMap {
             .find(|(_, idx)| **idx == slot)
             .map(|(name, _)| name.as_str())
     }
+
+    /// Reverse lookup — `(slot, param_index)` → name. When both a
+    /// human name (`"Wet Mix"`) and an LV2 symbol (`"wet_mix"`) point
+    /// at the same index we prefer the friendly form: contains
+    /// whitespace > longer > alphabetical (final tie-breaker for
+    /// deterministic output).
+    pub fn param_name_for(&self, slot: u32, param_index: u32) -> Option<&str> {
+        let sub = self.params.get(&slot)?;
+        sub.iter()
+            .filter(|(_, idx)| **idx == param_index)
+            .map(|(name, _)| name.as_str())
+            .max_by(|a, b| {
+                let key = |s: &str| {
+                    (
+                        s.contains(char::is_whitespace),
+                        s.chars().count(),
+                        std::cmp::Reverse(s.to_string()),
+                    )
+                };
+                key(a).cmp(&key(b))
+            })
+    }
 }
 
 #[cfg(test)]
@@ -219,5 +241,34 @@ mod tests {
         assert_eq!(map.plugin_name_for(0), Some("ZynReverb"));
         assert_eq!(map.plugin_name_for(1), Some("GxTuner"));
         assert_eq!(map.plugin_name_for(99), None);
+    }
+
+    #[test]
+    fn param_name_for_returns_longest_match_when_lv2_symbol_indexes_alongside_name() {
+        let project = CarlaProject {
+            plugins: vec![ProjectPlugin {
+                slot: 0,
+                name: "X".into(),
+                plugin_type: None,
+                uri: None,
+                label: None,
+                params: vec![ProjectParam {
+                    index: 7,
+                    name: "Wet Mix".into(),
+                    symbol: Some("wet_mix".into()),
+                }],
+            }],
+        };
+        let map = NameMap::from_project(&project);
+        // Both "Wet Mix" and "wet_mix" point to index 7; the longer
+        // friendly name should win for HUD display.
+        assert_eq!(map.param_name_for(0, 7), Some("Wet Mix"));
+    }
+
+    #[test]
+    fn param_name_for_returns_none_for_unknown_param_or_plugin() {
+        let map = NameMap::from_project(&fixture());
+        assert_eq!(map.param_name_for(99, 0), None);
+        assert_eq!(map.param_name_for(0, 99), None);
     }
 }

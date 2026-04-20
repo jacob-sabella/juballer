@@ -206,3 +206,14 @@ label = "Pick cab"
 plugin = 0
 mode = "open-preset-picker"
 category = "cabs"
+
+# Phase 4 active-preset-name display: shows whichever preset was
+# most recently applied to slot 0. Updates on load-preset taps and
+# preset-picker selections.
+[[page.cell]]
+row = 2
+col = 0
+label = "Active"
+[page.cell.display]
+mode = "active-preset-name"
+plugin = 0

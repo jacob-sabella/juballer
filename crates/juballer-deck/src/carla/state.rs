@@ -67,6 +67,10 @@ pub struct CarlaState {
     pages: Paginator<Page>,
     cache: ParamValueCache,
     last_touched: Option<LastTouched>,
+    /// `plugin_slot -> preset_name` for the most recent preset
+    /// applied to each plugin. Phase 4 `active-preset-name` display
+    /// cells render this verbatim.
+    active_presets: std::collections::HashMap<u32, String>,
 }
 
 impl CarlaState {
@@ -81,6 +85,7 @@ impl CarlaState {
             pages,
             cache: ParamValueCache::new(),
             last_touched: None,
+            active_presets: std::collections::HashMap::new(),
         }
     }
 
@@ -106,6 +111,16 @@ impl CarlaState {
             param,
             value,
         });
+    }
+
+    /// Record `preset` as the most recently applied preset for `plugin`.
+    /// Used by Phase 4 `active-preset-name` display cells.
+    pub fn record_active_preset(&mut self, plugin: u32, preset: String) {
+        self.active_presets.insert(plugin, preset);
+    }
+
+    pub fn active_preset(&self, plugin: u32) -> Option<&str> {
+        self.active_presets.get(&plugin).map(String::as_str)
     }
 
     /// Active page slice (always exactly one page; first element).
@@ -221,6 +236,20 @@ mod tests {
         assert!(s.next_page());
         assert_eq!(s.current_page_index(), 1);
         assert_eq!(s.active_page().unwrap().title.as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn state_active_preset_round_trip() {
+        let mut s = CarlaState::new(cfg_with_pages(vec![]));
+        assert_eq!(s.active_preset(0), None);
+        s.record_active_preset(0, "Vintage Marshall".into());
+        s.record_active_preset(2, "Modern Mesa".into());
+        assert_eq!(s.active_preset(0), Some("Vintage Marshall"));
+        assert_eq!(s.active_preset(2), Some("Modern Mesa"));
+        assert_eq!(s.active_preset(99), None);
+        // Re-recording overwrites.
+        s.record_active_preset(0, "Twin Reverb".into());
+        assert_eq!(s.active_preset(0), Some("Twin Reverb"));
     }
 
     #[test]
