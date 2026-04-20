@@ -750,6 +750,10 @@ fn build_paginator(
 /// process" constraint on some platforms). Tapping a *different* occupied
 /// cell switches the preview. Back-cell (3,3) or ESC exits without
 /// launching anything.
+/// Legacy entry: builds a picker mode + a one-shot App and runs it.
+/// External callers (CLI subcommand `play <dir>`) still go through
+/// here. Internal callers that need to swap the picker into an
+/// already-running App should use [`build_picker_mode`].
 pub fn pick(
     dir: &Path,
     difficulty: &str,
@@ -759,6 +763,66 @@ pub fn pick(
     backgrounds: Vec<PathBuf>,
     background_index: Option<usize>,
 ) -> Result<()> {
+    let mode = build_picker_mode(
+        dir,
+        difficulty,
+        user_offset_ms,
+        mute_sfx,
+        sfx_volume,
+        backgrounds,
+        background_index,
+    )?;
+    let mut app = App::builder()
+        .title("juballer — chart select")
+        .present_mode(PresentMode::Fifo)
+        .bg_color(Color::BLACK)
+        .controller_vid_pid(0x1973, 0x0011)
+        .build()?;
+    app.set_debug(false);
+    app.run_modes(mode)?;
+    Ok(())
+}
+
+/// Build a picker `Box<dyn Mode>` other App drivers can swap in via
+/// `Switcher::switch_to_boxed`. Used by [`pick`] internally + by the
+/// rhythm play loop when the player exits a song (Stage 3.5: play
+/// hands control back to the picker without exec).
+#[allow(clippy::too_many_arguments)]
+pub fn build_picker_mode(
+    dir: &Path,
+    difficulty: &str,
+    user_offset_ms: i32,
+    mute_sfx: bool,
+    sfx_volume: Option<f32>,
+    backgrounds: Vec<PathBuf>,
+    background_index: Option<usize>,
+) -> Result<Box<dyn juballer_core::Mode>> {
+    build_picker_mode_inner(
+        dir,
+        difficulty,
+        user_offset_ms,
+        mute_sfx,
+        sfx_volume,
+        backgrounds,
+        background_index,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_picker_mode_inner(
+    dir: &Path,
+    difficulty: &str,
+    user_offset_ms: i32,
+    mute_sfx: bool,
+    sfx_volume: Option<f32>,
+    backgrounds: Vec<PathBuf>,
+    background_index: Option<usize>,
+) -> Result<Box<dyn juballer_core::Mode>> {
+    // Owned copies hoisted up here for the on-exit factory the play
+    // mode invokes when the user finishes a song — captured by FnOnce
+    // closures inside the Launch handlers below.
+    let dir_owned = dir.to_path_buf();
+    let backgrounds_owned = backgrounds.clone();
     let entries = scan(dir)?;
     if entries.is_empty() {
         return Err(Error::Config(format!(
@@ -799,14 +863,6 @@ pub fn pick(
     // reserve (3,0)=PREV, (3,1)=NEXT for navigation on top of the
     // existing (3,2)=PLAY / (3,3)=EXIT buttons.
     let mut paginator = build_paginator(&all_entries, &view, &favs, &book, &exec_default_diff);
-
-    let mut app = App::builder()
-        .title("juballer — chart select")
-        .present_mode(PresentMode::Fifo)
-        .bg_color(Color::BLACK)
-        .controller_vid_pid(0x1973, 0x0011)
-        .build()?;
-    app.set_debug(false);
 
     let mut overlay = EguiOverlay::new();
     let exec_offset = user_offset_ms;
@@ -876,7 +932,7 @@ pub fn pick(
     let boot = std::time::Instant::now();
     let mut last_frame = std::time::Instant::now();
 
-    app.run_modes(juballer_core::closure_mode_with_switcher(
+    Ok(juballer_core::closure_mode_with_switcher(
         move |frame, events, switcher| {
             // Advance any active page transition so finished animations clear
             // cleanly before we process new input.
@@ -1204,6 +1260,24 @@ pub fn pick(
                                             &diff,
                                         ));
                                         let play_opts = crate::rhythm::PlayOpts::default();
+                                        // Factory the play mode invokes when the user
+                                        // exits the song — rebuilds the picker so the
+                                        // post-song transition is also in-process.
+                                        let dir_for_relaunch = dir_owned.clone();
+                                        let bgs_for_relaunch = backgrounds_owned.clone();
+                                        let diff_for_relaunch = exec_default_diff.clone();
+                                        let on_exit: Option<crate::rhythm::AfterPlay> =
+                                            Some(Box::new(move || {
+                                                crate::rhythm::picker::build_picker_mode(
+                                                    &dir_for_relaunch,
+                                                    &diff_for_relaunch,
+                                                    exec_offset,
+                                                    exec_mute_sfx,
+                                                    exec_sfx_volume,
+                                                    bgs_for_relaunch,
+                                                    background_index,
+                                                )
+                                            }));
                                         match crate::rhythm::build_play_mode(
                                             loaded_chart,
                                             exec_offset,
@@ -1213,6 +1287,7 @@ pub fn pick(
                                             persist,
                                             crate::rhythm::NoHook,
                                             play_opts,
+                                            on_exit,
                                         ) {
                                             Ok(play_mode) => {
                                                 switcher.switch_to_boxed(play_mode);
@@ -1357,6 +1432,21 @@ pub fn pick(
                                                         &diff,
                                                     ));
                                                 let play_opts = crate::rhythm::PlayOpts::default();
+                                                let dir_for_relaunch = dir_owned.clone();
+                                                let bgs_for_relaunch = backgrounds_owned.clone();
+                                                let diff_for_relaunch = exec_default_diff.clone();
+                                                let on_exit: Option<crate::rhythm::AfterPlay> =
+                                                    Some(Box::new(move || {
+                                                        crate::rhythm::picker::build_picker_mode(
+                                                            &dir_for_relaunch,
+                                                            &diff_for_relaunch,
+                                                            exec_offset,
+                                                            exec_mute_sfx,
+                                                            exec_sfx_volume,
+                                                            bgs_for_relaunch,
+                                                            background_index,
+                                                        )
+                                                    }));
                                                 match crate::rhythm::build_play_mode(
                                                     loaded_chart,
                                                     exec_offset,
@@ -1366,6 +1456,7 @@ pub fn pick(
                                                     persist,
                                                     crate::rhythm::NoHook,
                                                     play_opts,
+                                                    on_exit,
                                                 ) {
                                                     Ok(play_mode) => {
                                                         switcher.switch_to_boxed(play_mode);
@@ -1405,8 +1496,7 @@ pub fn pick(
                 }
             }
         },
-    ))?;
-    Ok(())
+    ))
 }
 
 fn paint_backgrounds(

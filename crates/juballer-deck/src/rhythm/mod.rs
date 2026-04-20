@@ -319,11 +319,21 @@ pub fn play_chart_with_hook<H: NarrationHook + 'static>(
     )
 }
 
+/// One-shot factory the play mode invokes when the user exits a
+/// song. Returning a fresh mode (typically the picker) hands control
+/// back without re-exec; returning `None` (the default) just exits.
+pub type AfterPlay = Box<dyn FnOnce() -> Result<Box<dyn juballer_core::Mode>>>;
+
 /// Build a play-mode `Box<dyn Mode>` that another App driver can hand
 /// to [`juballer_core::App::run_modes`]. Centralises the heavy
 /// setup (audio init, score lookup, marker pack discovery, …) so
 /// callers like the picker can construct a play mode and hand it off
 /// to the active App via `switcher.switch_to_boxed(...)` — no exec.
+///
+/// `on_exit` is called once when the player leaves the song. Picker-
+/// originated plays pass a factory that rebuilds the picker so the
+/// post-song transition is also in-process. CLI-originated plays
+/// pass `None` and the App driver exits cleanly on song end.
 #[allow(clippy::too_many_arguments)]
 pub fn build_play_mode<H: NarrationHook + 'static>(
     chart: Chart,
@@ -334,6 +344,7 @@ pub fn build_play_mode<H: NarrationHook + 'static>(
     persist: Option<ScorePersist>,
     narration: H,
     opts: PlayOpts,
+    on_exit: Option<AfterPlay>,
 ) -> Result<Box<dyn juballer_core::Mode>> {
     play_mode_inner(
         chart,
@@ -344,6 +355,7 @@ pub fn build_play_mode<H: NarrationHook + 'static>(
         persist,
         narration,
         opts,
+        on_exit,
     )
 }
 
@@ -370,6 +382,7 @@ fn play_chart_inner<H: NarrationHook + 'static>(
         persist,
         narration,
         opts,
+        None,
     )?;
     let mut app = App::builder()
         .title("juballer — rhythm")
@@ -392,7 +405,11 @@ fn play_mode_inner<H: NarrationHook + 'static>(
     persist: Option<ScorePersist>,
     mut narration: H,
     opts: PlayOpts,
+    on_exit: Option<AfterPlay>,
 ) -> Result<Box<dyn juballer_core::Mode>> {
+    // Closures aren't FnOnce-callable through &mut so the Option lives
+    // outside the closure and we `take()` it at the moment of exit.
+    let mut on_exit_slot: Option<AfterPlay> = on_exit;
     // Resolve shader path relative to CARGO_MANIFEST_DIR at build time; at run time
     // we probe for it under the crate root, falling back to the exe dir.
     let shader_path = resolve_shader_path();
@@ -828,7 +845,25 @@ fn play_mode_inner<H: NarrationHook + 'static>(
                     }
                     persisted = true;
                 }
-                switcher.exit();
+                // If a caller (the picker) handed us an after-exit
+                // factory, build the next mode and swap into it
+                // instead of leaving the App. The factory runs once;
+                // failure falls through to a clean exit so the user
+                // isn't stuck with a half-rebuilt next mode.
+                if let Some(factory) = on_exit_slot.take() {
+                    match factory() {
+                        Ok(next_mode) => switcher.switch_to_boxed(next_mode),
+                        Err(e) => {
+                            tracing::error!(
+                                target: "juballer::rhythm",
+                                "after-play factory failed: {e}"
+                            );
+                            switcher.exit();
+                        }
+                    }
+                } else {
+                    switcher.exit();
+                }
             }
         },
     ))
