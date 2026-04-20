@@ -518,10 +518,12 @@ pub fn countdown_label_phase(ms_until_start: f64) -> (&'static str, f32) {
     (label, phase)
 }
 
-/// Draw the pre-song countdown overlay. Renders a big pulsing "3 → 2 → 1 → GO!"
-/// in the grid area (below the top HUD). `ms_until_start` is what `-music_ms`
-/// would be at this frame — positive during the countdown, non-positive once
-/// the song has started.
+/// Draw the pre-song countdown overlay. Renders a pulsing
+/// "3 → 2 → 1 → GO!" banner inside the top HUD region — the only
+/// area that's guaranteed to be visible above the physical GAMO2
+/// controller (which sits over the 4×4 grid below). `ms_until_start`
+/// is what `-music_ms` would be at this frame — positive during the
+/// countdown, non-positive once the song has started.
 ///
 /// Caller is responsible for only invoking this while the countdown is active
 /// (e.g. `music_ms < 0.0` *or* a small grace window after 0 so "GO!" shows).
@@ -529,9 +531,6 @@ pub fn draw_countdown(frame: &mut Frame, overlay: &mut EguiOverlay, ms_until_sta
     let (label, phase) = countdown_label_phase(ms_until_start);
     // Fade: opaque at start of step, fading as phase → 1.0.
     let alpha = ((1.0 - phase) * 255.0).clamp(20.0, 255.0) as u8;
-    // Shrink: start large, settle smaller as the step closes.
-    let base_size = if label == "GO!" { 160.0 } else { 220.0 };
-    let size = base_size * (1.0 - 0.35 * phase);
     // "GO!" pops green; number steps pop white-ish.
     let color = if label == "GO!" {
         egui::Color32::from_rgba_unmultiplied(120, 255, 140, alpha)
@@ -539,53 +538,49 @@ pub fn draw_countdown(frame: &mut Frame, overlay: &mut EguiOverlay, ms_until_sta
         egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)
     };
 
-    // Paint into the grid area (everything below the HUD). `top_region_rect`
-    // gives us the HUD bounds; the rest of the window is our canvas.
+    // Paint into the top HUD region — that's the slice of the window
+    // that sits above the physical controller and is actually visible
+    // to the player. Glyph height is sized off the region height so a
+    // tall HUD gets a tall countdown without overflowing.
     let top_rect = frame.top_region_rect();
-    let win_w = frame.viewport_w() as f32;
-    let win_h = frame.viewport_h() as f32;
-    let grid_top = top_rect.y as f32 + top_rect.h as f32;
-    let grid_rect = egui::Rect::from_min_max(egui::pos2(0.0, grid_top), egui::pos2(win_w, win_h));
-
-    // Guard: on frames where the top region is taller than the window (e.g.
-    // transient resize racing with the HUD layout), grid_rect.height() can go
-    // negative and egui asserts on negative set_height. Skip the overlay
-    // rather than panic — the countdown flashes for 3s and losing a frame is
-    // invisible.
-    let grid_w = grid_rect.width().max(0.0);
-    let grid_h = grid_rect.height().max(0.0);
-    if grid_w <= 0.0 || grid_h <= 0.0 {
+    let top_w = top_rect.w as f32;
+    let top_h = top_rect.h as f32;
+    if top_w <= 0.0 || top_h <= 0.0 {
         return;
     }
+    // Glyph height capped well under the HUD height to leave vertical
+    // breathing room. Holds steady through the step (no per-frame size
+    // tweening — that read as jitter against the surrounding HUD).
+    let size = if label == "GO!" {
+        (top_h * 0.55).clamp(36.0, 72.0)
+    } else {
+        (top_h * 0.60).clamp(40.0, 80.0)
+    };
+    // Centered chip sized to the glyph so the backdrop doesn't paint
+    // over the score / life HUD widgets to either side.
+    let chip_w = (size * 1.6).min(top_w * 0.4);
+    let chip_h = (size * 1.2).min(top_h * 0.85);
+    let chip_x = top_rect.x as f32 + (top_w - chip_w) * 0.5;
+    let chip_y = top_rect.y as f32 + (top_h - chip_h) * 0.5;
 
     overlay.draw(frame, |rc| {
         let id = egui::Id::new("rhythm_countdown_root");
         egui::Area::new(id)
-            .fixed_pos(grid_rect.min)
+            .fixed_pos(egui::pos2(chip_x, chip_y))
             .order(egui::Order::Foreground)
             .show(rc.ctx(), |ui| {
-                ui.set_width(grid_w);
-                ui.set_height(grid_h);
+                ui.set_width(chip_w);
+                ui.set_height(chip_h);
                 let painter = ui.painter();
                 let rect = ui.max_rect();
-                // Soft translucent backdrop pulse so the digit pops even on
-                // bright cell shaders. Backdrop alpha tracks label alpha so
-                // it fades with the digit.
                 let backdrop_alpha = (alpha / 2).min(110);
                 painter.rect_filled(
                     rect,
                     egui::Rounding::same(8.0),
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, backdrop_alpha),
                 );
-                // Anchor near the top of the playfield instead of dead
-                // center — the physical Stream Deck controller sits over
-                // the lower half of the monitor and was hiding the
-                // countdown completely. Top quarter keeps it on screen
-                // above the controller for any plausible window size.
-                let center_x = rect.center().x;
-                let target_y = rect.top() + grid_h * 0.18;
                 painter.text(
-                    egui::pos2(center_x, target_y),
+                    rect.center(),
                     egui::Align2::CENTER_CENTER,
                     label,
                     egui::FontId::proportional(size),
