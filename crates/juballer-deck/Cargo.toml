@@ -39,6 +39,7 @@ indexmap.workspace = true
 tokio.workspace = true
 notify.workspace = true
 rosc.workspace = true
+roxmltree.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

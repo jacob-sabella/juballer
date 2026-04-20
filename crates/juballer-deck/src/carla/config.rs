@@ -61,6 +61,13 @@ pub struct CarlaTarget {
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
+    /// Optional path to a Carla `*.carxp` project file. When provided,
+    /// the runtime parses it at startup to build a name → index map
+    /// so cell bindings can use friendlier `plugin = "GxTuner"` and
+    /// `param = "FREQ"` strings instead of numeric slot indices.
+    /// When omitted, only numeric refs resolve.
+    #[serde(default)]
+    pub project: Option<PathBuf>,
 }
 
 impl Default for CarlaTarget {
@@ -68,6 +75,7 @@ impl Default for CarlaTarget {
         Self {
             host: DEFAULT_CARLA_HOST.to_string(),
             port: DEFAULT_CARLA_PORT,
+            project: None,
         }
     }
 }

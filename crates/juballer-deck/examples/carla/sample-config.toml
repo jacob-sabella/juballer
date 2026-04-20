@@ -17,6 +17,10 @@ description = "Two-page demo: a reverb page and a compressor page."
 [carla]
 host = "127.0.0.1"
 port = 22752
+# Optional: point at a Carla project file to make `plugin = "..."` and
+# `param = "..."` strings resolve in cell bindings. Without this, only
+# numeric indices work.
+# project = "/home/you/Music/projects/live.carxp"
 
 # ─── Page 1 — Reverb ──────────────────────────────────────────────
 [[page]]

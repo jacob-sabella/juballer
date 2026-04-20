@@ -16,6 +16,7 @@
 //! renderer, and the dispatcher all agree on the same number.
 
 use crate::carla::config::{Action, ActionMode, Cell, ParamRef, PluginRef};
+use crate::carla::names::NameMap;
 use crate::carla::state::ParamValueCache;
 use std::time::Duration;
 
@@ -62,13 +63,23 @@ pub enum Outcome {
 /// right outcomes for the given event. Updates `cache` with whatever
 /// new values were written so toggle/bump/carousel can read back the
 /// current value next time.
-pub fn dispatch(cell: &Cell, event: CellEvent, cache: &mut ParamValueCache) -> Vec<Outcome> {
+///
+/// `names` resolves `PluginRef::Name` / `ParamRef::Name` references
+/// to numeric indices via the name map built from the user's .carxp
+/// project. Name-only refs that don't appear in the map are dropped
+/// with a warning — see [`fire_action`] for the short-circuit path.
+pub fn dispatch(
+    cell: &Cell,
+    event: CellEvent,
+    cache: &mut ParamValueCache,
+    names: &NameMap,
+) -> Vec<Outcome> {
     let mut out = Vec::new();
     match event {
         CellEvent::KeyDown => {
             if let Some(action) = &cell.tap {
                 if matches!(action.mode, ActionMode::Momentary) {
-                    fire_action(action, ActionEdge::Down, cache, &mut out);
+                    fire_action(action, ActionEdge::Down, cache, names, &mut out);
                 }
             }
         }
@@ -76,18 +87,18 @@ pub fn dispatch(cell: &Cell, event: CellEvent, cache: &mut ParamValueCache) -> V
             let long = held.as_millis() as u64 >= HOLD_THRESHOLD_MS;
             if long {
                 if let Some(action) = &cell.hold {
-                    fire_action(action, ActionEdge::Up, cache, &mut out);
+                    fire_action(action, ActionEdge::Up, cache, names, &mut out);
                 }
                 // Momentary on tap still needs an off-edge even when
                 // the press qualified as a hold — otherwise the param
                 // sticks high after release.
                 if let Some(action) = &cell.tap {
                     if matches!(action.mode, ActionMode::Momentary) {
-                        fire_action(action, ActionEdge::Up, cache, &mut out);
+                        fire_action(action, ActionEdge::Up, cache, names, &mut out);
                     }
                 }
             } else if let Some(action) = &cell.tap {
-                fire_action(action, ActionEdge::Up, cache, &mut out);
+                fire_action(action, ActionEdge::Up, cache, names, &mut out);
             }
         }
     }
@@ -106,15 +117,28 @@ fn fire_action(
     action: &Action,
     edge: ActionEdge,
     cache: &mut ParamValueCache,
+    names: &NameMap,
     out: &mut Vec<Outcome>,
 ) {
-    let Some(plugin_id) = action.plugin.as_index() else {
-        // Names not yet resolvable (Phase 2). Skip dispatch; the OSC
-        // layer would also drop them but we short-circuit here so the
-        // cache stays clean.
+    let Some(plugin_id) = names.resolve_plugin(&action.plugin) else {
+        // Name didn't resolve in the loaded project map. Skip
+        // dispatch and keep the cache clean; the operator will see a
+        // warning at run() startup if the name was wrong.
+        tracing::warn!(
+            target: "juballer::carla::dispatch",
+            "plugin {:?} not in name map; dropping action",
+            action.plugin
+        );
         return;
     };
-    let param_id = action.param.as_ref().and_then(PluginRef::as_index);
+    let param_id = action
+        .param
+        .as_ref()
+        .and_then(|p| names.resolve_param(plugin_id, p));
+    // The Outcome should always carry the *resolved* numeric refs so
+    // the OSC client doesn't have to redo name resolution downstream.
+    let resolved_plugin = PluginRef::Index(plugin_id);
+    let resolved_param = param_id.map(PluginRef::Index);
 
     match action.mode {
         ActionMode::BumpUp | ActionMode::BumpDown => {
@@ -130,8 +154,8 @@ fn fire_action(
             let clamped = clamp(raw, action.min, action.max);
             cache.set(plugin_id, param_id, clamped);
             out.push(Outcome::SetParameter {
-                plugin: action.plugin.clone(),
-                param: action.param.clone().unwrap(),
+                plugin: resolved_plugin.clone(),
+                param: resolved_param.clone().unwrap(),
                 value: clamped,
             });
         }
@@ -147,8 +171,8 @@ fn fire_action(
             };
             cache.set(plugin_id, param_id, next);
             out.push(Outcome::SetParameter {
-                plugin: action.plugin.clone(),
-                param: action.param.clone().unwrap(),
+                plugin: resolved_plugin.clone(),
+                param: resolved_param.clone().unwrap(),
                 value: next,
             });
         }
@@ -160,8 +184,8 @@ fn fire_action(
             };
             cache.set(plugin_id, param_id, value);
             out.push(Outcome::SetParameter {
-                plugin: action.plugin.clone(),
-                param: action.param.clone().unwrap(),
+                plugin: resolved_plugin.clone(),
+                param: resolved_param.clone().unwrap(),
                 value,
             });
         }
@@ -170,8 +194,8 @@ fn fire_action(
             let Some(value) = action.value else { return };
             cache.set(plugin_id, param_id, value);
             out.push(Outcome::SetParameter {
-                plugin: action.plugin.clone(),
-                param: action.param.clone().unwrap(),
+                plugin: resolved_plugin.clone(),
+                param: resolved_param.clone().unwrap(),
                 value,
             });
         }
@@ -197,8 +221,8 @@ fn fire_action(
             let next = values[next_idx];
             cache.set(plugin_id, param_id, next);
             out.push(Outcome::SetParameter {
-                plugin: action.plugin.clone(),
-                param: action.param.clone().unwrap(),
+                plugin: resolved_plugin.clone(),
+                param: resolved_param.clone().unwrap(),
                 value: next,
             });
         }
@@ -207,13 +231,13 @@ fn fire_action(
                 return;
             };
             out.push(Outcome::LoadPreset {
-                plugin: action.plugin.clone(),
+                plugin: resolved_plugin,
                 preset,
             });
         }
         ActionMode::OpenPresetPicker => {
             out.push(Outcome::OpenPresetPicker {
-                plugin: action.plugin.clone(),
+                plugin: resolved_plugin,
                 category: action.category.clone(),
             });
         }
@@ -224,22 +248,6 @@ fn clamp(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
     let lo = min.unwrap_or(f32::NEG_INFINITY);
     let hi = max.unwrap_or(f32::INFINITY);
     value.clamp(lo, hi)
-}
-
-/// Helper for callers that want the numeric index out of a [`PluginRef`]
-/// without going through the OSC layer's name-resolution warning. The
-/// dispatcher uses this to short-circuit name-only refs in Phase 1.
-trait PluginRefExt {
-    fn as_index(&self) -> Option<u32>;
-}
-
-impl PluginRefExt for PluginRef {
-    fn as_index(&self) -> Option<u32> {
-        match self {
-            PluginRef::Index(i) => Some(*i),
-            PluginRef::Name(_) => None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -293,7 +301,7 @@ mod tests {
         let mut cell = empty_cell();
         cell.tap = Some(action_set(1, 2, 0.7));
         let mut cache = ParamValueCache::new();
-        let out = dispatch(&cell, quick_release(), &mut cache);
+        let out = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         assert_eq!(out.len(), 1);
         match &out[0] {
             Outcome::SetParameter { value, .. } => assert!((value - 0.7).abs() < 1e-6),
@@ -307,7 +315,7 @@ mod tests {
         let mut cell = empty_cell();
         cell.tap = Some(action_set(1, 2, 0.7));
         let mut cache = ParamValueCache::new();
-        let out = dispatch(&cell, long_release(), &mut cache);
+        let out = dispatch(&cell, long_release(), &mut cache, &NameMap::empty());
         assert!(out.is_empty(), "tap should yield to hold on long press");
     }
 
@@ -316,8 +324,8 @@ mod tests {
         let mut cell = empty_cell();
         cell.hold = Some(action_set(3, 4, 0.0));
         let mut cache = ParamValueCache::new();
-        assert!(dispatch(&cell, quick_release(), &mut cache).is_empty());
-        let out = dispatch(&cell, long_release(), &mut cache);
+        assert!(dispatch(&cell, quick_release(), &mut cache, &NameMap::empty()).is_empty());
+        let out = dispatch(&cell, long_release(), &mut cache, &NameMap::empty());
         assert_eq!(out.len(), 1);
     }
 
@@ -333,7 +341,7 @@ mod tests {
         });
         let mut cache = ParamValueCache::new();
         cache.set(1, 2, 0.9);
-        let out = dispatch(&cell, quick_release(), &mut cache);
+        let out = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &out[0] {
             Outcome::SetParameter { value, .. } => {
                 assert!((value - 1.0).abs() < 1e-6, "should clamp to max");
@@ -354,7 +362,7 @@ mod tests {
         });
         let mut cache = ParamValueCache::new();
         // No prior value cached → starts at 0.0, decrement clamps to 0.0
-        let out = dispatch(&cell, quick_release(), &mut cache);
+        let out = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &out[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 0.0),
             _ => panic!("expected set"),
@@ -372,10 +380,10 @@ mod tests {
         });
         let mut cache = ParamValueCache::new();
         // First press: cache has nothing → defaults to off → flips to on.
-        let a = dispatch(&cell, quick_release(), &mut cache);
+        let a = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         assert_eq!(cache.get(1, 2), Some(1.0));
         // Second press: cache has on → flips to off.
-        let b = dispatch(&cell, quick_release(), &mut cache);
+        let b = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         assert_eq!(cache.get(1, 2), Some(0.0));
         assert_ne!(a, b);
     }
@@ -390,12 +398,12 @@ mod tests {
             ..action_set(1, 2, 0.0)
         });
         let mut cache = ParamValueCache::new();
-        let down = dispatch(&cell, CellEvent::KeyDown, &mut cache);
+        let down = dispatch(&cell, CellEvent::KeyDown, &mut cache, &NameMap::empty());
         match &down[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 1.0),
             _ => panic!("expected on"),
         }
-        let up = dispatch(&cell, quick_release(), &mut cache);
+        let up = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &up[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 0.0),
             _ => panic!("expected off"),
@@ -417,7 +425,7 @@ mod tests {
         let mut cache = ParamValueCache::new();
         // Skip the down event for clarity — the up event alone should
         // still emit the off-value.
-        let up = dispatch(&cell, long_release(), &mut cache);
+        let up = dispatch(&cell, long_release(), &mut cache, &NameMap::empty());
         assert_eq!(up.len(), 1);
         match &up[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 0.0),
@@ -435,15 +443,15 @@ mod tests {
         });
         let mut cache = ParamValueCache::new();
         // Cache empty → starts at index 0 → advance to 0.25.
-        let a = dispatch(&cell, quick_release(), &mut cache);
+        let a = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &a[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 0.25),
             _ => panic!("expected set"),
         }
         // Walk to the end then wrap.
-        dispatch(&cell, quick_release(), &mut cache); // 0.5
-        dispatch(&cell, quick_release(), &mut cache); // 0.75
-        let last = dispatch(&cell, quick_release(), &mut cache);
+        dispatch(&cell, quick_release(), &mut cache, &NameMap::empty()); // 0.5
+        dispatch(&cell, quick_release(), &mut cache, &NameMap::empty()); // 0.75
+        let last = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &last[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 0.0),
             _ => panic!("expected wrap"),
@@ -460,13 +468,13 @@ mod tests {
         });
         let mut cache = ParamValueCache::new();
         // Empty cache → idx=0 → prev wraps to last (2.0).
-        let a = dispatch(&cell, quick_release(), &mut cache);
+        let a = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &a[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 2.0),
             _ => panic!("expected wrap to last"),
         }
         // Now at 2.0 → idx=2 → prev to 1.0.
-        let b = dispatch(&cell, quick_release(), &mut cache);
+        let b = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         match &b[0] {
             Outcome::SetParameter { value, .. } => assert_eq!(*value, 1.0),
             _ => panic!("expected previous"),
@@ -481,15 +489,27 @@ mod tests {
             ..action_set(0, 0, 0.5)
         });
         let mut cache = ParamValueCache::new();
-        assert!(dispatch(&cell, quick_release(), &mut cache).is_empty());
+        assert!(dispatch(&cell, quick_release(), &mut cache, &NameMap::empty()).is_empty());
         assert!(cache.is_empty(), "cache must not record name-only writes");
     }
 
     #[test]
     fn empty_cell_yields_no_outcomes() {
         let mut cache = ParamValueCache::new();
-        assert!(dispatch(&empty_cell(), quick_release(), &mut cache).is_empty());
-        assert!(dispatch(&empty_cell(), CellEvent::KeyDown, &mut cache).is_empty());
+        assert!(dispatch(
+            &empty_cell(),
+            quick_release(),
+            &mut cache,
+            &NameMap::empty()
+        )
+        .is_empty());
+        assert!(dispatch(
+            &empty_cell(),
+            CellEvent::KeyDown,
+            &mut cache,
+            &NameMap::empty()
+        )
+        .is_empty());
     }
 
     #[test]
@@ -501,7 +521,7 @@ mod tests {
             ..action_set(1, 0, 0.0)
         });
         let mut cache = ParamValueCache::new();
-        let out = dispatch(&cell, quick_release(), &mut cache);
+        let out = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         assert_eq!(
             out[0],
             Outcome::LoadPreset {
@@ -520,7 +540,7 @@ mod tests {
             ..action_set(0, 0, 0.0)
         });
         let mut cache = ParamValueCache::new();
-        let out = dispatch(&cell, quick_release(), &mut cache);
+        let out = dispatch(&cell, quick_release(), &mut cache, &NameMap::empty());
         assert_eq!(
             out[0],
             Outcome::OpenPresetPicker {

@@ -134,6 +134,10 @@ cells.
   example cab-sim presets.
 - Defaults to Carla's built-in OSC server on `127.0.0.1:22752`;
   override per-config in the `[carla]` block.
+- Set `[carla].project = "/path/to/file.carxp"` to make
+  `plugin = "GxTuner"` and `param = "FREQ"` strings resolve to the
+  numeric indices Carla uses over OSC. Without it, only numeric
+  refs work.
 
 ## Install
 

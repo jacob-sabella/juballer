@@ -30,9 +30,11 @@
 //! no-op — wiring it requires tracking the most recently applied
 //! preset per plugin, which Phase 4 will add.
 
+pub mod carxp;
 pub mod config;
 pub mod dispatch;
 pub mod listener;
+pub mod names;
 pub mod osc;
 pub mod picker;
 pub mod preset;
@@ -66,6 +68,31 @@ pub fn run(path: &Path) -> Result<()> {
     let client = osc::CarlaClient::spawn(rt.handle(), target)?;
     let live_listener = listener::spawn(rt.handle(), target).ok();
     let live_feed = live_listener.as_ref().map(listener::CarlaListener::feed);
+
+    let names = match cfg.carla.project.as_ref() {
+        Some(path) => match carxp::CarlaProject::load(path) {
+            Ok(project) => {
+                let map = names::NameMap::from_project(&project);
+                tracing::info!(
+                    target: "juballer::carla",
+                    "loaded project {} ({} plugins, {} parameter names)",
+                    path.display(),
+                    map.plugin_count(),
+                    map.param_count()
+                );
+                map
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "juballer::carla",
+                    "could not parse project {}: {e} (named refs will not resolve)",
+                    path.display()
+                );
+                names::NameMap::empty()
+            }
+        },
+        None => names::NameMap::empty(),
+    };
 
     let mut state = state::CarlaState::new(cfg);
     let mut press_starts: HashMap<(u8, u8), Instant> = HashMap::new();
@@ -132,6 +159,7 @@ pub fn run(path: &Path) -> Result<()> {
                         &client,
                         &presets,
                         &mut preset_picker_state,
+                        &names,
                     );
                 }
                 Event::KeyUp { row, col, .. } => {
@@ -243,6 +271,7 @@ pub fn run(path: &Path) -> Result<()> {
                         live_listener.as_ref(),
                         &presets,
                         &mut preset_picker_state,
+                        &names,
                     );
                 }
                 Event::Quit => {
@@ -285,6 +314,7 @@ fn resolve_target(target: &config::CarlaTarget) -> Result<SocketAddr> {
         .ok_or_else(|| crate::Error::Config(format!("carla target {key}: no addresses resolved")))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_key_down(
     row: u8,
     col: u8,
@@ -293,6 +323,7 @@ fn on_key_down(
     client: &osc::CarlaClient,
     presets: &preset::PresetLibrary,
     preset_picker_state: &mut Option<preset_picker::PresetPickerState>,
+    names: &names::NameMap,
 ) {
     press_starts.insert((row, col), Instant::now());
     if row == render::NAV_ROW {
@@ -301,7 +332,7 @@ fn on_key_down(
     let Some(cell) = lookup_cell(state, row, col) else {
         return;
     };
-    let outcomes = dispatch::dispatch(&cell, CellEvent::KeyDown, state.cache_mut());
+    let outcomes = dispatch::dispatch(&cell, CellEvent::KeyDown, state.cache_mut(), names);
     for outcome in outcomes {
         handle_outcome(outcome, client, state, presets, preset_picker_state);
     }
@@ -317,6 +348,7 @@ fn on_key_up(
     live: Option<&listener::CarlaListener>,
     presets: &preset::PresetLibrary,
     preset_picker_state: &mut Option<preset_picker::PresetPickerState>,
+    names: &names::NameMap,
 ) {
     let held = press_starts
         .remove(&(row, col))
@@ -331,7 +363,7 @@ fn on_key_up(
     let Some(cell) = lookup_cell(state, row, col) else {
         return;
     };
-    let outcomes = dispatch::dispatch(&cell, CellEvent::KeyUp { held }, state.cache_mut());
+    let outcomes = dispatch::dispatch(&cell, CellEvent::KeyUp { held }, state.cache_mut(), names);
     for outcome in outcomes {
         handle_outcome(outcome, client, state, presets, preset_picker_state);
     }
@@ -449,6 +481,7 @@ mod tests {
         let t = CarlaTarget {
             host: "no-such-host.invalid.juballer-test".into(),
             port: 22752,
+            project: None,
         };
         let err = resolve_target(&t).unwrap_err();
         let msg = err.to_string();
