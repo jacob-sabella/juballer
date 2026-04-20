@@ -138,6 +138,11 @@ cells.
   `plugin = "GxTuner"` and `param = "FREQ"` strings resolve to the
   numeric indices Carla uses over OSC. Without it, only numeric
   refs work.
+- `juballer-deck carla-save-preset --plugin <NAME|IDX> --name <PRESET>
+  [--category cabs] [--project file.carxp]` snapshots the current
+  parameter values for one plugin out of Carla's live OSC feed and
+  writes a `<root>/<category>/<name>.preset.toml` you can later
+  trigger with a `load-preset` cell.
 
 ## Install
 

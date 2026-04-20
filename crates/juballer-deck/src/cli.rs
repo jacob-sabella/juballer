@@ -106,13 +106,49 @@ pub enum SubCmd {
     /// turns the 4×4 grid into an OSC remote for Carla — each cell binds
     /// to a plugin parameter (or pair of them via tap + hold). When
     /// `CONFIG` is omitted, falls back to the first `*.toml` under
-    /// `~/.config/juballer/carla/configs/`. Phase 1: input cells only;
-    /// display + preset modes parse but no-op.
+    /// `~/.config/juballer/carla/configs/`.
     Carla {
         /// Path to a Carla configuration TOML. When omitted, picks the
         /// alphabetically-first file from the default config dir.
         #[arg(value_name = "CONFIG")]
         config: Option<PathBuf>,
+    },
+    /// Capture the current parameter values of one Carla plugin into
+    /// a preset file. Briefly registers as an OSC client to receive
+    /// the live `/Carla/param` stream, snapshots it, and writes a
+    /// `<root>/<category>/<name>.preset.toml` using the same schema
+    /// the `load-preset` cell mode reads.
+    CarlaSavePreset {
+        /// Plugin name (resolved via `--project`) or numeric slot index.
+        #[arg(long)]
+        plugin: String,
+        /// User-facing preset name. Becomes the `name = "..."` field
+        /// and the filename stem.
+        #[arg(long)]
+        name: String,
+        /// Optional category; presets land under `<root>/<category>/`.
+        #[arg(long)]
+        category: Option<String>,
+        /// Optional `*.carxp` to resolve plugin / param names.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Preset library root. Defaults to
+        /// `~/.config/juballer/carla/presets/`.
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Carla OSC host. Default `127.0.0.1`.
+        #[arg(long)]
+        host: Option<String>,
+        /// Carla OSC port. Default `22752`.
+        #[arg(long)]
+        port: Option<u16>,
+        /// Capture window in milliseconds. Default 2500.
+        #[arg(long)]
+        wait_ms: Option<u64>,
+        /// Override the `target_plugin = "..."` field. Defaults to the
+        /// resolved plugin's display name.
+        #[arg(long)]
+        target_label: Option<String>,
     },
 }
 
@@ -231,6 +267,29 @@ pub fn run(cli: Cli) -> Result<()> {
                 })?,
             };
             return crate::carla::run(&path);
+        }
+        Some(SubCmd::CarlaSavePreset {
+            plugin,
+            name,
+            category,
+            project,
+            root,
+            host,
+            port,
+            wait_ms,
+            target_label,
+        }) => {
+            return run_carla_save_preset(
+                plugin,
+                name,
+                category,
+                project,
+                root,
+                host,
+                port,
+                wait_ms,
+                target_label,
+            );
         }
         None => None,
     };
@@ -370,6 +429,70 @@ fn first_carla_config() -> Option<std::path::PathBuf> {
         .collect();
     entries.sort();
     entries.into_iter().next()
+}
+
+/// Carla `save-preset` subcommand entry. Parses the user's flags
+/// into a [`crate::carla::capture::CaptureRequest`] and runs the
+/// capture; surfaces the resulting file path to stdout.
+#[allow(clippy::too_many_arguments)]
+fn run_carla_save_preset(
+    plugin: String,
+    name: String,
+    category: Option<String>,
+    project: Option<PathBuf>,
+    root: Option<PathBuf>,
+    host: Option<String>,
+    port: Option<u16>,
+    wait_ms: Option<u64>,
+    target_label: Option<String>,
+) -> Result<()> {
+    use crate::carla::capture::{capture_preset, CaptureRequest};
+    use crate::carla::config::{ParamRef, PluginRef, DEFAULT_CARLA_HOST, DEFAULT_CARLA_PORT};
+    use crate::carla::names::NameMap;
+
+    let plugin_ref = match plugin.parse::<u32>() {
+        Ok(n) => PluginRef::Index(n),
+        Err(_) => PluginRef::Name(plugin),
+    };
+    let _ = std::convert::identity::<ParamRef>;
+    let names = match project.as_ref() {
+        Some(path) => {
+            let parsed = crate::carla::carxp::CarlaProject::load(path)?;
+            NameMap::from_project(&parsed)
+        }
+        None => NameMap::empty(),
+    };
+    let host_str = host.unwrap_or_else(|| DEFAULT_CARLA_HOST.to_string());
+    let port_num = port.unwrap_or(DEFAULT_CARLA_PORT);
+    let target = format!("{host_str}:{port_num}")
+        .parse()
+        .map_err(|e| crate::Error::Config(format!("carla target: {e}")))?;
+    let req = CaptureRequest {
+        target,
+        plugin: plugin_ref,
+        name,
+        description: None,
+        category,
+        root: root.unwrap_or_else(crate::carla::config::default_presets_dir),
+        capture_window: wait_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(CaptureRequest::default_capture_window),
+        target_plugin_label: target_label,
+    };
+    let report = capture_preset(req, &names)?;
+    if !report.feed_was_active {
+        eprintln!(
+            "warning: no OSC packets received from Carla in the capture window — \
+             is Carla running and reachable on the configured host:port?"
+        );
+    }
+    println!(
+        "wrote {} param(s) for plugin #{} to {}",
+        report.preset.params.len(),
+        report.plugin_index,
+        report.written_to.display()
+    );
+    Ok(())
 }
 
 fn wire_plugin_host(deck: &mut DeckApp, rt: &tokio::runtime::Handle) {

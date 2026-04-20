@@ -30,6 +30,7 @@
 //! no-op — wiring it requires tracking the most recently applied
 //! preset per plugin, which Phase 4 will add.
 
+pub mod capture;
 pub mod carxp;
 pub mod config;
 pub mod dispatch;
