@@ -346,8 +346,7 @@ pub fn apply_sort(
             entries.sort_by(|a, b| {
                 let av = scores.last_played(&a.path, difficulty);
                 let bv = scores.last_played(&b.path, difficulty);
-                last_played_cmp(av, bv, view.direction)
-                    .then_with(|| cmp_title(a, b))
+                last_played_cmp(av, bv, view.direction).then_with(|| cmp_title(a, b))
             });
         }
         SortMode::Score => {

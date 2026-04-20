@@ -1,3 +1,4 @@
+use crate::app::mode::{ClosureMode, Mode, ModeOutcome};
 use crate::render::{gpu::Gpu, window::open_fullscreen};
 use crate::{App, Color, Rect, Result};
 use std::sync::Arc;
@@ -6,13 +7,16 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
 
-struct Runtime<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> {
+struct Runtime {
     cfg: crate::AppBuilder,
     cfg_top_layout: Option<crate::layout::Node>,
     profile: Option<crate::Profile>,
     window: Option<Arc<winit::window::Window>>,
     gpu: Option<Gpu>,
-    draw: F,
+    /// Active mode. The driver hands every frame to `mode.frame(...)`
+    /// and acts on the returned outcome — `Continue` keeps rendering,
+    /// `SwitchTo` swaps the box in place, `Exit` breaks the event loop.
+    mode: Box<dyn Mode>,
     cell_rects: [Rect; 16],
     pane_rects: indexmap::IndexMap<crate::layout::PaneId, Rect>,
     pending_events: Vec<crate::input::Event>,
@@ -27,7 +31,7 @@ struct Runtime<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> {
     raw_ring: Option<std::sync::Arc<crate::input::EventRing>>,
 }
 
-impl<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> ApplicationHandler for Runtime<F> {
+impl ApplicationHandler for Runtime {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -430,7 +434,7 @@ impl<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> ApplicationHandler
                         None
                     };
                     let mut pending_layout: Option<Option<crate::layout::Node>> = None;
-                    render_one_frame(
+                    let outcome = render_one_frame(
                         gpu,
                         self.cfg.bg_color,
                         &self.cell_rects,
@@ -441,10 +445,23 @@ impl<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> ApplicationHandler
                         cal_phase,
                         cal_top_rect.as_ref(),
                         top_outer,
-                        &mut self.draw,
+                        self.mode.as_mut(),
                         &self.pending_events,
                         &mut pending_layout,
                     );
+                    match outcome {
+                        ModeOutcome::Continue => {}
+                        ModeOutcome::SwitchTo(new_mode) => {
+                            // Swap in the new mode for the next frame.
+                            // The outgoing mode drops here so its
+                            // destructor (audio handles, OSC clients,
+                            // …) runs before the next frame begins.
+                            self.mode = new_mode;
+                        }
+                        ModeOutcome::Exit => {
+                            event_loop.exit();
+                        }
+                    }
                     if let Some(new_layout) = pending_layout {
                         self.cfg_top_layout = new_layout;
                         if let Some(p) = &self.profile {
@@ -473,7 +490,7 @@ impl<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])> ApplicationHandler
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
+fn render_one_frame(
     gpu: &mut Gpu,
     bg: Color,
     cell_rects: &[crate::Rect; 16],
@@ -484,10 +501,10 @@ fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
     cal_phase: Option<&crate::calibration::Phase>,
     cal_top_rect: Option<&crate::Rect>,
     top_outer: crate::Rect,
-    draw: &mut F,
+    mode: &mut dyn Mode,
     events: &[crate::input::Event],
     pending_top_layout: &mut Option<Option<crate::layout::Node>>,
-) {
+) -> ModeOutcome {
     let mut enc = gpu
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -518,7 +535,9 @@ fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
         });
     }
 
-    // 2. User draw callback.
+    // 2. Active mode's frame callback. The returned outcome is
+    // bubbled out so the driver can swap modes / exit between frames.
+    let outcome;
     {
         let mut frame = crate::Frame {
             device: &gpu.device,
@@ -534,7 +553,7 @@ fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
             format: gpu.offscreen.format,
             pending_top_layout,
         };
-        draw(&mut frame, events);
+        outcome = mode.frame(&mut frame, events);
     }
 
     // 2b. Lib-drawn borders (overlay user content so borders are always visible).
@@ -562,7 +581,10 @@ fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
     // 3. Composite to swapchain.
     let frame_tex = match gpu.surface.get_current_texture() {
         Ok(f) => f,
-        Err(_) => return,
+        // Surface acquisition failure (resize race, swapchain lost,
+        // …): drop this frame but honour whatever outcome the mode
+        // already produced so a SwitchTo / Exit doesn't get stuck.
+        Err(_) => return outcome,
     };
     let dst = frame_tex
         .texture
@@ -579,6 +601,7 @@ fn render_one_frame<F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event])>(
     );
     gpu.queue.submit(Some(enc.finish()));
     frame_tex.present();
+    outcome
 }
 
 fn draw_borders(
@@ -784,11 +807,24 @@ fn key_to_code_for_calibration(k: &winit::keyboard::Key) -> String {
 }
 
 impl App {
-    /// Run the app with a user draw callback receiving a `Frame` and pending `Event` slice.
+    /// Run the app with a user draw callback receiving a `Frame` and
+    /// pending `Event` slice. Backwards-compatible shorthand for the
+    /// single-mode case — internally wraps the closure in
+    /// [`crate::app::Mode`] machinery via [`crate::app::ClosureMode`]
+    /// so it shares a code path with [`Self::run_modes`].
     pub fn run<F>(self, draw: F) -> Result<()>
     where
         F: FnMut(&mut crate::Frame<'_>, &[crate::input::Event]) + 'static,
     {
+        self.run_modes(Box::new(ClosureMode { draw }))
+    }
+
+    /// Run the app driving an arbitrary [`Mode`]. Modes can request
+    /// [`ModeOutcome::SwitchTo`] mid-run to swap themselves out — the
+    /// `winit` EventLoop and (where the platform allows) the GPU
+    /// surface stay alive across the transition, so deck → rhythm →
+    /// deck no longer needs the historical exec() bounce.
+    pub fn run_modes(self, initial: Box<dyn Mode>) -> Result<()> {
         let event_loop = winit::event_loop::EventLoop::new()?;
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         let mut runtime = Runtime {
@@ -797,7 +833,7 @@ impl App {
             profile: None,
             window: None,
             gpu: None,
-            draw,
+            mode: initial,
             cell_rects: [Rect::ZERO; 16],
             pane_rects: indexmap::IndexMap::new(),
             pending_events: Vec::new(),
