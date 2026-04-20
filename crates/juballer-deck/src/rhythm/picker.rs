@@ -1270,7 +1270,15 @@ fn build_picker_mode_inner(
                                             &entry.path,
                                             &diff,
                                         ));
-                                        let play_opts = crate::rhythm::PlayOpts::default();
+                                        // Forward the picker's background list / pinned
+                                        // index into the play mode — default-constructed
+                                        // `PlayOpts` left both empty, which silently hid
+                                        // the HUD shader during song play.
+                                        let play_opts = crate::rhythm::PlayOpts {
+                                            backgrounds: backgrounds.clone(),
+                                            background_index,
+                                            ..crate::rhythm::PlayOpts::default()
+                                        };
                                         // Factory the play mode invokes when the user
                                         // exits the song — rebuilds the picker so the
                                         // post-song transition is also in-process.
@@ -1442,7 +1450,11 @@ fn build_picker_mode_inner(
                                                         &entry.path,
                                                         &diff,
                                                     ));
-                                                let play_opts = crate::rhythm::PlayOpts::default();
+                                                let play_opts = crate::rhythm::PlayOpts {
+                                                    backgrounds: backgrounds.clone(),
+                                                    background_index,
+                                                    ..crate::rhythm::PlayOpts::default()
+                                                };
                                                 let dir_for_relaunch = dir_owned.clone();
                                                 let bgs_for_relaunch = backgrounds_owned.clone();
                                                 let diff_for_relaunch = exec_default_diff.clone();
