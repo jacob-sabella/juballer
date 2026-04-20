@@ -919,7 +919,14 @@ fn build_picker_mode_inner(
     // Reusing this across previews avoids the ~10-30 ms cold-open cost
     // per chart switch. Sinks are still per-preview (Sink::stop drops
     // queued audio on switch).
-    let (_preview_stream, preview_handle) = OutputStream::try_default()
+    //
+    // The `OutputStream` has to outlive every sink we create against
+    // its handle — cpal drops the backing device when the Stream goes
+    // out of scope and subsequent `Sink::try_new` calls come back
+    // `NoDevice`. The `move` closure below only captures variables it
+    // references, so we stash the stream inside the closure scope via
+    // a dedicated binding that gets read once per frame.
+    let (preview_stream, preview_handle) = OutputStream::try_default()
         .map_err(|e| Error::Config(format!("preview: no output device: {e}")))?;
     let mut preview: Option<PreviewPlayer> = None;
     let mut jackets = JacketCache::new();
@@ -934,6 +941,10 @@ fn build_picker_mode_inner(
 
     Ok(juballer_core::closure_mode_with_switcher(
         move |frame, events, switcher| {
+            // Keep the preview audio stream owned by the closure — a
+            // bare `let _preview_stream` binding at function scope
+            // would drop it the instant `build_picker_mode` returns.
+            let _keep_preview_stream_alive = &preview_stream;
             // Advance any active page transition so finished animations clear
             // cleanly before we process new input.
             paginator.tick();
