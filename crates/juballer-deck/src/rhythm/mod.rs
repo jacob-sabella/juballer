@@ -154,14 +154,14 @@ pub fn play_with_opts(
 }
 
 /// Bundle describing where to read/write high-score entries for the session.
-struct ScorePersist {
+pub struct ScorePersist {
     chart_path: PathBuf,
     difficulty: String,
     book_path: PathBuf,
 }
 
 impl ScorePersist {
-    fn new(chart_path: &Path, difficulty: &str) -> Self {
+    pub fn new(chart_path: &Path, difficulty: &str) -> Self {
         Self {
             chart_path: chart_path.to_path_buf(),
             difficulty: difficulty.to_string(),
@@ -319,6 +319,49 @@ pub fn play_chart_with_hook<H: NarrationHook + 'static>(
     )
 }
 
+/// One-shot factory the play mode invokes when the user exits a
+/// song. Returning a fresh mode (typically the picker) hands control
+/// back without re-exec; returning `None` (the default) just exits.
+pub type AfterPlay = Box<dyn FnOnce() -> Result<Box<dyn juballer_core::Mode>>>;
+
+/// Build a play-mode `Box<dyn Mode>` that another App driver can hand
+/// to [`juballer_core::App::run_modes`]. Centralises the heavy
+/// setup (audio init, score lookup, marker pack discovery, …) so
+/// callers like the picker can construct a play mode and hand it off
+/// to the active App via `switcher.switch_to_boxed(...)` — no exec.
+///
+/// `on_exit` is called once when the player leaves the song. Picker-
+/// originated plays pass a factory that rebuilds the picker so the
+/// post-song transition is also in-process. CLI-originated plays
+/// pass `None` and the App driver exits cleanly on song end.
+#[allow(clippy::too_many_arguments)]
+pub fn build_play_mode<H: NarrationHook + 'static>(
+    chart: Chart,
+    user_offset_ms: i32,
+    mute_sfx: bool,
+    sfx_volume: Option<f32>,
+    countdown_ms: u32,
+    persist: Option<ScorePersist>,
+    narration: H,
+    opts: PlayOpts,
+    on_exit: Option<AfterPlay>,
+) -> Result<Box<dyn juballer_core::Mode>> {
+    play_mode_inner(
+        chart,
+        user_offset_ms,
+        mute_sfx,
+        sfx_volume,
+        countdown_ms,
+        persist,
+        narration,
+        opts,
+        on_exit,
+    )
+}
+
+/// Legacy entry: builds a play mode + a one-shot App and runs it.
+/// Existing CLI subcommands still go through here; the picker now
+/// goes through [`build_play_mode`] + the active App's switcher.
 #[allow(clippy::too_many_arguments)]
 fn play_chart_inner<H: NarrationHook + 'static>(
     chart: Chart,
@@ -327,9 +370,46 @@ fn play_chart_inner<H: NarrationHook + 'static>(
     sfx_volume: Option<f32>,
     countdown_ms: u32,
     persist: Option<ScorePersist>,
-    mut narration: H,
+    narration: H,
     opts: PlayOpts,
 ) -> Result<()> {
+    let mode = build_play_mode(
+        chart,
+        user_offset_ms,
+        mute_sfx,
+        sfx_volume,
+        countdown_ms,
+        persist,
+        narration,
+        opts,
+        None,
+    )?;
+    let mut app = App::builder()
+        .title("juballer — rhythm")
+        .present_mode(PresentMode::Fifo)
+        .bg_color(juballer_core::Color::BLACK)
+        .controller_vid_pid(0x1973, 0x0011)
+        .build()?;
+    app.set_debug(false);
+    app.run_modes(mode)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn play_mode_inner<H: NarrationHook + 'static>(
+    chart: Chart,
+    user_offset_ms: i32,
+    mute_sfx: bool,
+    sfx_volume: Option<f32>,
+    countdown_ms: u32,
+    persist: Option<ScorePersist>,
+    mut narration: H,
+    opts: PlayOpts,
+    on_exit: Option<AfterPlay>,
+) -> Result<Box<dyn juballer_core::Mode>> {
+    // Closures aren't FnOnce-callable through &mut so the Option lives
+    // outside the closure and we `take()` it at the moment of exit.
+    let mut on_exit_slot: Option<AfterPlay> = on_exit;
     // Resolve shader path relative to CARGO_MANIFEST_DIR at build time; at run time
     // we probe for it under the crate root, falling back to the exe dir.
     let shader_path = resolve_shader_path();
@@ -376,14 +456,6 @@ fn play_chart_inner<H: NarrationHook + 'static>(
     if mute_sfx {
         tracing::info!(target: "juballer::rhythm", "hit sounds muted via --mute-sfx");
     }
-
-    let mut app = App::builder()
-        .title("juballer — rhythm")
-        .present_mode(PresentMode::Fifo)
-        .bg_color(juballer_core::Color::BLACK)
-        .controller_vid_pid(0x1973, 0x0011)
-        .build()?;
-    app.set_debug(false);
 
     let mut state = GameState::new(chart);
     state.no_fail = opts.no_fail;
@@ -460,322 +532,341 @@ fn play_chart_inner<H: NarrationHook + 'static>(
     let mut corner_downs: [Option<Instant>; 4] = [None; 4];
     let corners: [(u8, u8); 4] = [(0, 0), (0, 3), (3, 0), (3, 3)];
 
-    app.run(move |frame, events| {
-        // Translate each input event, updating game state at the event's `ts`.
-        let mut want_exit = false;
-        for ev in events {
-            match ev {
-                Event::KeyDown { row, col, ts, .. } => {
-                    // Post-finish: results screen is interactive.
-                    //
-                    //   (3,0) → APPLY OFFSET GLOBALLY  (writes
-                    //          `[rhythm] audio_offset_ms` in deck.toml)
-                    //   (3,1) → APPLY OFFSET TO THIS SONG  (writes
-                    //          per-chart override book)
-                    //   any other cell → CONTINUE (exit, return-to-picker
-                    //          if RETURN_TO env says so)
-                    //
-                    // The screen otherwise stays up indefinitely — there
-                    // is no auto-exit timer, players need time to read.
-                    if state.finished {
-                        let suggest = state.recommended_audio_offset_ms();
-                        if (*row, *col) == (3, 0) {
-                            if let Some(off) = suggest {
-                                let path =
-                                    crate::config::paths::default_config_dir().join("deck.toml");
-                                if let Err(e) = write_global_audio_offset(&path, off) {
-                                    tracing::warn!(target: "juballer::rhythm",
+    Ok(juballer_core::closure_mode_with_switcher(
+        move |frame, events, switcher| {
+            // Translate each input event, updating game state at the event's `ts`.
+            let mut want_exit = false;
+            for ev in events {
+                match ev {
+                    Event::KeyDown { row, col, ts, .. } => {
+                        // Post-finish: results screen is interactive.
+                        //
+                        //   (3,0) → APPLY OFFSET GLOBALLY  (writes
+                        //          `[rhythm] audio_offset_ms` in deck.toml)
+                        //   (3,1) → APPLY OFFSET TO THIS SONG  (writes
+                        //          per-chart override book)
+                        //   any other cell → CONTINUE (exit, return-to-picker
+                        //          if RETURN_TO env says so)
+                        //
+                        // The screen otherwise stays up indefinitely — there
+                        // is no auto-exit timer, players need time to read.
+                        if state.finished {
+                            let suggest = state.recommended_audio_offset_ms();
+                            if (*row, *col) == (3, 0) {
+                                if let Some(off) = suggest {
+                                    let path = crate::config::paths::default_config_dir()
+                                        .join("deck.toml");
+                                    if let Err(e) = write_global_audio_offset(&path, off) {
+                                        tracing::warn!(target: "juballer::rhythm",
                                         "apply offset (global) failed: {e}");
-                                } else {
-                                    tracing::info!(target: "juballer::rhythm",
+                                    } else {
+                                        tracing::info!(target: "juballer::rhythm",
                                         "applied audio_offset_ms={off} globally to {}",
                                         path.display());
+                                    }
                                 }
-                            }
-                            offset_applied_at = Some(Instant::now());
-                        } else if (*row, *col) == (3, 1) {
-                            if let (Some(off), Some(p)) = (suggest, persist.as_ref()) {
-                                match chart_overrides::ChartOverrideBook::load_default() {
-                                    Ok(mut book) => {
-                                        book.set_offset(&p.chart_path, off);
-                                        if let Err(e) = book.save_default() {
-                                            tracing::warn!(target: "juballer::rhythm",
+                                offset_applied_at = Some(Instant::now());
+                            } else if (*row, *col) == (3, 1) {
+                                if let (Some(off), Some(p)) = (suggest, persist.as_ref()) {
+                                    match chart_overrides::ChartOverrideBook::load_default() {
+                                        Ok(mut book) => {
+                                            book.set_offset(&p.chart_path, off);
+                                            if let Err(e) = book.save_default() {
+                                                tracing::warn!(target: "juballer::rhythm",
                                                 "apply offset (song) save failed: {e}");
-                                        } else {
-                                            tracing::info!(target: "juballer::rhythm",
+                                            } else {
+                                                tracing::info!(target: "juballer::rhythm",
                                                 "applied audio_offset_ms={off} to chart {}",
                                                 p.chart_path.display());
+                                            }
                                         }
-                                    }
-                                    Err(e) => tracing::warn!(target: "juballer::rhythm",
+                                        Err(e) => tracing::warn!(target: "juballer::rhythm",
                                         "chart_overrides load failed: {e}"),
+                                    }
                                 }
+                                offset_applied_at = Some(Instant::now());
+                            } else {
+                                want_exit = true;
                             }
-                            offset_applied_at = Some(Instant::now());
-                        } else {
-                            want_exit = true;
+                            continue;
                         }
-                        continue;
-                    }
-                    let press_ms = music_time_from_ts(&audio, *ts);
-                    // Track the held-cell bitmask regardless of music_ms so
-                    // warm-up taps during the countdown still show up in the
-                    // `bound` / `held_mask` channels of the background shader.
-                    let bit = 1u16 << ((*row as u16) * 4 + (*col as u16));
-                    held_mask |= bit;
-                    if press_ms >= 0.0 {
-                        if let Some(grade) = state.on_press(*row, *col, press_ms) {
-                            tracing::debug!(
-                                target: "juballer::rhythm",
-                                "hit ({},{}) -> {:?} @ {press_ms:.1}ms",
-                                row, col, grade
-                            );
-                            sfx.play(grade);
-                            last_hit_music_ms = Some(press_ms);
-                            last_hit_grade = Some(grade);
+                        let press_ms = music_time_from_ts(&audio, *ts);
+                        // Track the held-cell bitmask regardless of music_ms so
+                        // warm-up taps during the countdown still show up in the
+                        // `bound` / `held_mask` channels of the background shader.
+                        let bit = 1u16 << ((*row as u16) * 4 + (*col as u16));
+                        held_mask |= bit;
+                        if press_ms >= 0.0 {
+                            if let Some(grade) = state.on_press(*row, *col, press_ms) {
+                                tracing::debug!(
+                                    target: "juballer::rhythm",
+                                    "hit ({},{}) -> {:?} @ {press_ms:.1}ms",
+                                    row, col, grade
+                                );
+                                sfx.play(grade);
+                                last_hit_music_ms = Some(press_ms);
+                                last_hit_grade = Some(grade);
+                            }
                         }
-                    }
-                    // Track corner-hold emergency exit.
-                    for (i, (r, c)) in corners.iter().enumerate() {
-                        if r == row && c == col {
-                            corner_downs[i] = Some(*ts);
+                        // Track corner-hold emergency exit.
+                        for (i, (r, c)) in corners.iter().enumerate() {
+                            if r == row && c == col {
+                                corner_downs[i] = Some(*ts);
+                            }
                         }
                     }
+                    Event::KeyUp { row, col, ts, .. } => {
+                        let release_ms = music_time_from_ts(&audio, *ts);
+                        let bit = 1u16 << ((*row as u16) * 4 + (*col as u16));
+                        held_mask &= !bit;
+                        if release_ms >= 0.0 {
+                            if let Some(g) = state.on_release(*row, *col, release_ms) {
+                                tracing::debug!(
+                                    target: "juballer::rhythm",
+                                    "release ({},{}) -> {:?} @ {release_ms:.1}ms",
+                                    row, col, g
+                                );
+                                sfx.play(g);
+                                last_hit_music_ms = Some(release_ms);
+                                last_hit_grade = Some(g);
+                            }
+                        }
+                        for (i, (r, c)) in corners.iter().enumerate() {
+                            if r == row && c == col {
+                                corner_downs[i] = None;
+                            }
+                        }
+                    }
+                    Event::Quit => {
+                        want_exit = true;
+                    }
+                    Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
+                        want_exit = true;
+                    }
+                    _ => {}
                 }
-                Event::KeyUp { row, col, ts, .. } => {
-                    let release_ms = music_time_from_ts(&audio, *ts);
-                    let bit = 1u16 << ((*row as u16) * 4 + (*col as u16));
-                    held_mask &= !bit;
-                    if release_ms >= 0.0 {
-                        if let Some(g) = state.on_release(*row, *col, release_ms) {
-                            tracing::debug!(
-                                target: "juballer::rhythm",
-                                "release ({},{}) -> {:?} @ {release_ms:.1}ms",
-                                row, col, g
-                            );
-                            sfx.play(g);
-                            last_hit_music_ms = Some(release_ms);
-                            last_hit_grade = Some(g);
-                        }
-                    }
-                    for (i, (r, c)) in corners.iter().enumerate() {
-                        if r == row && c == col {
-                            corner_downs[i] = None;
-                        }
-                    }
-                }
-                Event::Quit => {
+            }
+
+            // All four corners held ≥ 3s → exit.
+            if corner_downs.iter().all(|o| o.is_some()) {
+                let earliest = corner_downs
+                    .iter()
+                    .filter_map(|o| *o)
+                    .min()
+                    .unwrap_or_else(Instant::now);
+                if earliest.elapsed() >= std::time::Duration::from_secs(3) {
                     want_exit = true;
                 }
-                Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
-                    want_exit = true;
+            }
+
+            // Advance clock.
+            let music_ms = audio.position_ms();
+            // Pre-song countdown phase: music_ms is negative. Don't advance the
+            // game-state clock — that would start judging notes (and auto-MISSing
+            // them) before audio has even begun. Rendering continues so we can
+            // paint the countdown overlay; note draws self-gate via the render
+            // window.
+            let in_countdown = music_ms < 0.0;
+            if !in_countdown {
+                state.tick(music_ms);
+            }
+
+            // Hard-fail: life bar drained. Stop the music the moment we detect
+            // it, remember the wall-clock instant, then let the render pass paint
+            // the FAILED banner for a short grace before exiting below.
+            if state.failed && failed_at.is_none() {
+                failed_at = Some(Instant::now());
+                audio.stop();
+                log_final(&state);
+            }
+
+            // Mark finished when the sink drained AND we've passed the last note's MISS
+            // cutoff. Keep the HUD up for a few seconds so the player can read it.
+            let last_hit = state
+                .chart
+                .notes
+                .last()
+                .map(|n| n.hit_time_ms)
+                .unwrap_or(0.0);
+            if !state.finished
+                && !in_countdown
+                && (audio.is_finished() || music_ms > last_hit + 2_000.0)
+                && state.judged_notes() == state.total_notes()
+            {
+                state.finished = true;
+                log_final(&state);
+                // Persist as soon as we're finished so the banner shows the new
+                // personal best if this run beat it.
+                if !persisted {
+                    if let Some(p) = persist.as_ref() {
+                        let record = ScoreRecord::from_state(&state);
+                        p.persist(record);
+                        // Refresh best to reflect this run (may bump it).
+                        state.best_score = match state.best_score {
+                            Some(prev) => Some(prev.max(state.score)),
+                            None => Some(state.score),
+                        };
+                    }
+                    persisted = true;
                 }
-                _ => {}
             }
-        }
 
-        // All four corners held ≥ 3s → exit.
-        if corner_downs.iter().all(|o| o.is_some()) {
-            let earliest = corner_downs
-                .iter()
-                .filter_map(|o| *o)
-                .min()
-                .unwrap_or_else(Instant::now);
-            if earliest.elapsed() >= std::time::Duration::from_secs(3) {
-                want_exit = true;
-            }
-        }
+            // 1. Background fill.
+            render::paint_backgrounds(frame);
+            // 2. Per-tile note shaders.
+            let boot_secs = boot.elapsed().as_secs_f32();
+            let dt = {
+                let now = Instant::now();
+                let d = now.duration_since(last_frame).as_secs_f32();
+                last_frame = now;
+                d
+            };
 
-        // Advance clock.
-        let music_ms = audio.position_ms();
-        // Pre-song countdown phase: music_ms is negative. Don't advance the
-        // game-state clock — that would start judging notes (and auto-MISSing
-        // them) before audio has even begun. Rendering continues so we can
-        // paint the countdown overlay; note draws self-gate via the render
-        // window.
-        let in_countdown = music_ms < 0.0;
-        if !in_countdown {
-            state.tick(music_ms);
-        }
+            // Build the per-frame channel bundle the background consumes.
+            let bg_inputs = background::BackgroundInputs {
+                music_ms: state.music_time_ms,
+                bpm: state.chart.schedule.bpm_at(state.music_time_ms),
+                beat_phase: {
+                    let b = state.chart.schedule.bpm_at(state.music_time_ms).max(1.0);
+                    let ms_per_beat = 60_000.0 / b;
+                    ((state.music_time_ms.rem_euclid(ms_per_beat)) / ms_per_beat) as f32
+                },
+                combo: state.combo,
+                score: state.score,
+                life: state.life,
+                held_mask,
+                last_grade: last_hit_grade
+                    .map(|g| match g {
+                        Grade::Perfect => 1.0,
+                        Grade::Great => 2.0,
+                        Grade::Good => 3.0,
+                        Grade::Poor => 4.0,
+                        Grade::Miss => 5.0,
+                    })
+                    .unwrap_or(0.0),
+                last_hit_elapsed_ms: last_hit_music_ms
+                    .map(|h| state.music_time_ms - h)
+                    .unwrap_or(1e9),
+                last_hit_accent: last_hit_grade
+                    .map(|g| render::grade_color(Some(g)))
+                    .unwrap_or([1.0, 1.0, 1.0, 1.0]),
+                spectrum: spectrum.snapshot(),
+            };
 
-        // Hard-fail: life bar drained. Stop the music the moment we detect
-        // it, remember the wall-clock instant, then let the render pass paint
-        // the FAILED banner for a short grace before exiting below.
-        if state.failed && failed_at.is_none() {
-            failed_at = Some(Instant::now());
-            audio.stop();
-            log_final(&state);
-        }
-
-        // Mark finished when the sink drained AND we've passed the last note's MISS
-        // cutoff. Keep the HUD up for a few seconds so the player can read it.
-        let last_hit = state
-            .chart
-            .notes
-            .last()
-            .map(|n| n.hit_time_ms)
-            .unwrap_or(0.0);
-        if !state.finished
-            && !in_countdown
-            && (audio.is_finished() || music_ms > last_hit + 2_000.0)
-            && state.judged_notes() == state.total_notes()
-        {
-            state.finished = true;
-            log_final(&state);
-            // Persist as soon as we're finished so the banner shows the new
-            // personal best if this run beat it.
-            if !persisted {
-                if let Some(p) = persist.as_ref() {
-                    let record = ScoreRecord::from_state(&state);
-                    p.persist(record);
-                    // Refresh best to reflect this run (may bump it).
-                    state.best_score = match state.best_score {
-                        Some(prev) => Some(prev.max(state.score)),
-                        None => Some(state.score),
-                    };
+            // HUD top-bar background (shader mode) — rendered raw into the
+            // top region so the HUD's text overlay composes on top of it.
+            // Image-mode backgrounds paint from inside the HUD's own
+            // overlay below (see draw_hud_with_narration call).
+            if let Some(bg) = &background {
+                if matches!(bg, background::Background::Shader(_)) {
+                    let top_rect = frame.top_region_rect();
+                    background::draw_shader(
+                        frame,
+                        bg,
+                        top_rect,
+                        bg_inputs,
+                        &mut shader_cache,
+                        boot_secs,
+                        dt,
+                    );
                 }
-                persisted = true;
             }
-        }
 
-        // 1. Background fill.
-        render::paint_backgrounds(frame);
-        // 2. Per-tile note shaders.
-        let boot_secs = boot.elapsed().as_secs_f32();
-        let dt = {
-            let now = Instant::now();
-            let d = now.duration_since(last_frame).as_secs_f32();
-            last_frame = now;
-            d
-        };
+            render::draw_notes(
+                frame,
+                &state,
+                &mut shader_cache,
+                &shader_path,
+                boot_secs,
+                dt,
+            );
+            // 2a. Hit-moment rings — stationary cyan targets drawn under the sprites.
+            render::draw_hit_rings(frame, &mut hit_ring_overlay, &state);
+            // 2a'. Long-note tail arrows — chain of chevrons across every cell
+            // between the head and the memon `p` tail position, pointing at the
+            // head. Painted after the rings so it composes over them but
+            // before the marker sprites so the head sprite still wins on the
+            // head cell.
+            render::draw_long_tail_arrows(frame, &mut long_tail_overlay, &state);
+            // 2b. Tap-note markers — PNG sprite path via its own dedicated
+            // EguiOverlay (shares none of the HUD overlay's renderer state).
+            render::draw_notes_markers(
+                frame,
+                &mut marker_overlay,
+                &mut markers,
+                &marker_dir,
+                &state,
+            );
 
-        // Build the per-frame channel bundle the background consumes.
-        let bg_inputs = background::BackgroundInputs {
-            music_ms: state.music_time_ms,
-            bpm: state.chart.schedule.bpm_at(state.music_time_ms),
-            beat_phase: {
-                let b = state.chart.schedule.bpm_at(state.music_time_ms).max(1.0);
-                let ms_per_beat = 60_000.0 / b;
-                ((state.music_time_ms.rem_euclid(ms_per_beat)) / ms_per_beat) as f32
-            },
-            combo: state.combo,
-            score: state.score,
-            life: state.life,
-            held_mask,
-            last_grade: last_hit_grade
-                .map(|g| match g {
-                    Grade::Perfect => 1.0,
-                    Grade::Great => 2.0,
-                    Grade::Good => 3.0,
-                    Grade::Poor => 4.0,
-                    Grade::Miss => 5.0,
-                })
-                .unwrap_or(0.0),
-            last_hit_elapsed_ms: last_hit_music_ms
-                .map(|h| state.music_time_ms - h)
-                .unwrap_or(1e9),
-            last_hit_accent: last_hit_grade
-                .map(|g| render::grade_color(Some(g)))
-                .unwrap_or([1.0, 1.0, 1.0, 1.0]),
-            spectrum: spectrum.snapshot(),
-        };
-
-        // HUD top-bar background (shader mode) — rendered raw into the
-        // top region so the HUD's text overlay composes on top of it.
-        // Image-mode backgrounds paint from inside the HUD's own
-        // overlay below (see draw_hud_with_narration call).
-        if let Some(bg) = &background {
-            if matches!(bg, background::Background::Shader(_)) {
-                let top_rect = frame.top_region_rect();
-                background::draw_shader(
-                    frame,
-                    bg,
-                    top_rect,
-                    bg_inputs,
-                    &mut shader_cache,
-                    boot_secs,
-                    dt,
-                );
-            }
-        }
-
-        render::draw_notes(
-            frame,
-            &state,
-            &mut shader_cache,
-            &shader_path,
-            boot_secs,
-            dt,
-        );
-        // 2a. Hit-moment rings — stationary cyan targets drawn under the sprites.
-        render::draw_hit_rings(frame, &mut hit_ring_overlay, &state);
-        // 2a'. Long-note tail arrows — chain of chevrons across every cell
-        // between the head and the memon `p` tail position, pointing at the
-        // head. Painted after the rings so it composes over them but
-        // before the marker sprites so the head sprite still wins on the
-        // head cell.
-        render::draw_long_tail_arrows(frame, &mut long_tail_overlay, &state);
-        // 2b. Tap-note markers — PNG sprite path via its own dedicated
-        // EguiOverlay (shares none of the HUD overlay's renderer state).
-        render::draw_notes_markers(
-            frame,
-            &mut marker_overlay,
-            &mut markers,
-            &marker_dir,
-            &state,
-        );
-
-        // 2c. Image-mode HUD background: painted into its own overlay
-        // right before the HUD so the HUD text sits on top.
-        if let Some(bg) = &background {
-            if matches!(bg, background::Background::Image(_)) {
-                let top_rect = frame.top_region_rect();
-                bg_image_overlay.draw(frame, |rc| {
-                    background::draw_image(rc, bg, top_rect, &mut bg_img_cache);
-                });
-            }
-        }
-        // 3. HUD. Narration hook runs every frame — returning `Some(text)`
-        // causes the renderer to paint a translucent strip under the title.
-        let narration_text = narration.narrate(&state, music_ms);
-        render::draw_hud_with_narration(
-            frame,
-            &mut overlay,
-            &state,
-            state.finished,
-            &mut hud_jackets,
-            narration_text.as_deref(),
-            offset_applied_at,
-        );
-        // 4. Pre-song countdown overlay. Only active during the delay window;
-        // we also hold a brief "GO!" frame (~400ms) once audio has kicked off
-        // so the word has time to register visually.
-        if music_ms < 400.0 && countdown_ms > 0 {
-            render::draw_countdown(frame, &mut overlay, -music_ms);
-        }
-
-        // No auto-exit on finish — the results screen stays up until the
-        // player taps any cell (which sets want_exit above). Failed runs
-        // still auto-clear after a 2.5 s grace because there's no useful
-        // input to make on the FAILED banner.
-        let post_fail_grace = failed_at
-            .map(|t| t.elapsed() >= std::time::Duration::from_millis(2_500))
-            .unwrap_or(false);
-        if want_exit || post_fail_grace {
-            audio.stop();
-            log_final(&state);
-            // Persist on abrupt exit too (only if any note was actually
-            // judged — don't pollute the book with zero-note quits).
-            if !persisted && state.judged_notes() > 0 {
-                if let Some(p) = persist.as_ref() {
-                    p.persist(ScoreRecord::from_state(&state));
+            // 2c. Image-mode HUD background: painted into its own overlay
+            // right before the HUD so the HUD text sits on top.
+            if let Some(bg) = &background {
+                if matches!(bg, background::Background::Image(_)) {
+                    let top_rect = frame.top_region_rect();
+                    bg_image_overlay.draw(frame, |rc| {
+                        background::draw_image(rc, bg, top_rect, &mut bg_img_cache);
+                    });
                 }
-                persisted = true;
             }
-            exit::exit(0);
-        }
-    })?;
-    Ok(())
+            // 3. HUD. Narration hook runs every frame — returning `Some(text)`
+            // causes the renderer to paint a translucent strip under the title.
+            let narration_text = narration.narrate(&state, music_ms);
+            render::draw_hud_with_narration(
+                frame,
+                &mut overlay,
+                &state,
+                state.finished,
+                &mut hud_jackets,
+                narration_text.as_deref(),
+                offset_applied_at,
+            );
+            // 4. Pre-song countdown overlay. Only active during the delay window;
+            // we also hold a brief "GO!" frame (~400ms) once audio has kicked off
+            // so the word has time to register visually.
+            if music_ms < 400.0 && countdown_ms > 0 {
+                render::draw_countdown(frame, &mut overlay, -music_ms);
+            }
+
+            // No auto-exit on finish — the results screen stays up until the
+            // player taps any cell (which sets want_exit above). Failed runs
+            // still auto-clear after a 2.5 s grace because there's no useful
+            // input to make on the FAILED banner.
+            let post_fail_grace = failed_at
+                .map(|t| t.elapsed() >= std::time::Duration::from_millis(2_500))
+                .unwrap_or(false);
+            if want_exit || post_fail_grace {
+                audio.stop();
+                log_final(&state);
+                // Persist on abrupt exit too (only if any note was actually
+                // judged — don't pollute the book with zero-note quits).
+                if !persisted && state.judged_notes() > 0 {
+                    if let Some(p) = persist.as_ref() {
+                        p.persist(ScoreRecord::from_state(&state));
+                    }
+                    persisted = true;
+                }
+                // If a caller (the picker) handed us an after-exit
+                // factory, build the next mode and swap into it
+                // instead of leaving the App. The factory runs once;
+                // failure falls through to a clean exit so the user
+                // isn't stuck with a half-rebuilt next mode.
+                if let Some(factory) = on_exit_slot.take() {
+                    match factory() {
+                        Ok(next_mode) => switcher.switch_to_boxed(next_mode),
+                        Err(e) => {
+                            tracing::error!(
+                                target: "juballer::rhythm",
+                                "after-play factory failed: {e}"
+                            );
+                            switcher.exit();
+                        }
+                    }
+                } else {
+                    switcher.exit();
+                }
+            }
+        },
+    ))
 }
 
 /// Compute the music-time at the moment a winit/evdev input event arrived,

@@ -1,8 +1,10 @@
 mod builder;
+mod mode;
 pub(crate) mod profile_loader;
 mod run;
 
 pub use builder::{AppBuilder, PresentMode, RefreshTarget};
+pub use mode::{closure_mode_with_switcher, Mode, ModeOutcome, Switcher};
 
 use crate::{Profile, Result};
 

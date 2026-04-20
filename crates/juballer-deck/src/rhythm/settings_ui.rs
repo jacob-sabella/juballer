@@ -201,41 +201,48 @@ pub fn run(paths: &DeckPaths) -> Result<()> {
     let mut overlay = EguiOverlay::new();
     let deck_path = paths.deck_toml.clone();
 
-    app.run(move |frame, events| {
-        paint_backgrounds(frame);
-        draw_overlay(frame, &mut overlay, &state);
+    app.run_modes(juballer_core::closure_mode_with_switcher(
+        move |frame, events, switcher| {
+            paint_backgrounds(frame);
+            draw_overlay(frame, &mut overlay, &state);
 
-        for ev in events {
-            match ev {
-                Event::KeyDown { row, col, .. } => match state.apply_cell(*row, *col) {
-                    Action::Exit => {
-                        if state != initial {
-                            if let Err(e) = write_rhythm_section(&deck_path, &state) {
-                                tracing::warn!(
-                                    target: "juballer::rhythm::settings",
-                                    "write failed: {e}"
-                                );
-                            } else {
-                                tracing::info!(
-                                    target: "juballer::rhythm::settings",
-                                    "settings saved → {}",
-                                    deck_path.display()
-                                );
+            for ev in events {
+                match ev {
+                    Event::KeyDown { row, col, .. } => match state.apply_cell(*row, *col) {
+                        Action::Exit => {
+                            if state != initial {
+                                if let Err(e) = write_rhythm_section(&deck_path, &state) {
+                                    tracing::warn!(
+                                        target: "juballer::rhythm::settings",
+                                        "write failed: {e}"
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        target: "juballer::rhythm::settings",
+                                        "settings saved → {}",
+                                        deck_path.display()
+                                    );
+                                }
                             }
+                            switcher.exit();
+                            return;
                         }
-                        super::exit::exit(0);
+                        Action::Changed | Action::None => {}
+                    },
+                    Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
+                        // Escape = cancel without writing.
+                        switcher.exit();
+                        return;
                     }
-                    Action::Changed | Action::None => {}
-                },
-                Event::Unmapped { key, .. } if key.0 == "NAMED_Escape" => {
-                    // Escape = cancel without writing.
-                    super::exit::exit(0);
+                    Event::Quit => {
+                        switcher.exit();
+                        return;
+                    }
+                    _ => {}
                 }
-                Event::Quit => super::exit::exit(0),
-                _ => {}
             }
-        }
-    })?;
+        },
+    ))?;
     Ok(())
 }
 
