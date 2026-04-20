@@ -145,6 +145,26 @@ fn error_json(msg: impl Into<String>) -> serde_json::Value {
     serde_json::json!({ "error": msg.into() })
 }
 
+/// Reject URL segments that can escape the config root or poke at hidden
+/// dotfiles before they ever reach a filesystem join. Names we accept map
+/// 1:1 to on-disk directory / file names.
+fn safe_segment(name: &str) -> std::result::Result<(), axum::response::Response> {
+    let bad = name.is_empty()
+        || name.len() > 64
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name.starts_with('.');
+    if bad {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(error_json("invalid name: path-unsafe characters")),
+        )
+            .into_response());
+    }
+    Ok(())
+}
+
 /// Reject requests without the configured bearer token. `Ok(())` ⇒ allow; otherwise
 /// returns a `(status, body)` pair the caller short-circuits with.
 fn check_auth(
@@ -205,6 +225,9 @@ async fn api_profile(
     Path(name): Path<String>,
     State(state): State<Arc<EditorState>>,
 ) -> impl IntoResponse {
+    if let Err(r) = safe_segment(&name) {
+        return r;
+    }
     let cfg = state.config.lock().unwrap();
     match cfg.profiles.get(&name) {
         Some(p) => {
@@ -239,6 +262,9 @@ async fn api_action_schema(
     Path(name): Path<String>,
     State(state): State<Arc<EditorState>>,
 ) -> impl IntoResponse {
+    if let Err(r) = safe_segment(&name) {
+        return r;
+    }
     if !state.action_names.iter().any(|n| n == &name) {
         return (StatusCode::NOT_FOUND, Json(error_json("unknown action"))).into_response();
     }
@@ -254,6 +280,9 @@ async fn api_widget_schema(
     Path(name): Path<String>,
     State(state): State<Arc<EditorState>>,
 ) -> impl IntoResponse {
+    if let Err(r) = safe_segment(&name) {
+        return r;
+    }
     if !state.widget_names.iter().any(|n| n == &name) {
         return (StatusCode::NOT_FOUND, Json(error_json("unknown widget"))).into_response();
     }
@@ -269,6 +298,12 @@ async fn api_get_page(
     Path((profile, page)): Path<(String, String)>,
     State(state): State<Arc<EditorState>>,
 ) -> impl IntoResponse {
+    if let Err(r) = safe_segment(&profile) {
+        return r;
+    }
+    if let Err(r) = safe_segment(&page) {
+        return r;
+    }
     let cfg = state.config.lock().unwrap();
     let prof = match cfg.profiles.get(&profile) {
         Some(p) => p,
@@ -288,6 +323,12 @@ async fn api_write_page(
 ) -> impl IntoResponse {
     if let Err(r) = check_auth(&state, &headers) {
         return r.into_response();
+    }
+    if let Err(r) = safe_segment(&profile) {
+        return r;
+    }
+    if let Err(r) = safe_segment(&page) {
+        return r;
     }
     let toml_value = match json_to_toml_value(&body) {
         Some(v) => v,
@@ -327,6 +368,9 @@ async fn api_activate_profile(
 ) -> impl IntoResponse {
     if let Err(r) = check_auth(&state, &headers) {
         return r.into_response();
+    }
+    if let Err(r) = safe_segment(&profile) {
+        return r;
     }
     {
         let cfg = state.config.lock().unwrap();
@@ -394,6 +438,9 @@ async fn api_restart_plugin(
 ) -> impl IntoResponse {
     if let Err(r) = check_auth(&state, &headers) {
         return r.into_response();
+    }
+    if let Err(r) = safe_segment(&name) {
+        return r;
     }
     let Some(host) = state.plugin_host.clone() else {
         return (StatusCode::NOT_FOUND, Json(error_json("plugin not found"))).into_response();
@@ -497,6 +544,19 @@ fn json_to_toml_value(v: &serde_json::Value) -> Option<toml::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_segment_accepts_plain_names() {
+        assert!(safe_segment("home").is_ok());
+        assert!(safe_segment("main_page-01").is_ok());
+    }
+
+    #[test]
+    fn safe_segment_rejects_traversal_and_separators() {
+        for bad in ["..", ".", "../x", "x/y", "x\\y", ".hidden", "", "a\0b"] {
+            assert!(safe_segment(bad).is_err(), "expected reject for {bad:?}");
+        }
+    }
 
     #[test]
     fn client_message_parses_preview_action() {
