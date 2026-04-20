@@ -154,14 +154,14 @@ pub fn play_with_opts(
 }
 
 /// Bundle describing where to read/write high-score entries for the session.
-struct ScorePersist {
+pub struct ScorePersist {
     chart_path: PathBuf,
     difficulty: String,
     book_path: PathBuf,
 }
 
 impl ScorePersist {
-    fn new(chart_path: &Path, difficulty: &str) -> Self {
+    pub fn new(chart_path: &Path, difficulty: &str) -> Self {
         Self {
             chart_path: chart_path.to_path_buf(),
             difficulty: difficulty.to_string(),
@@ -319,6 +319,37 @@ pub fn play_chart_with_hook<H: NarrationHook + 'static>(
     )
 }
 
+/// Build a play-mode `Box<dyn Mode>` that another App driver can hand
+/// to [`juballer_core::App::run_modes`]. Centralises the heavy
+/// setup (audio init, score lookup, marker pack discovery, …) so
+/// callers like the picker can construct a play mode and hand it off
+/// to the active App via `switcher.switch_to_boxed(...)` — no exec.
+#[allow(clippy::too_many_arguments)]
+pub fn build_play_mode<H: NarrationHook + 'static>(
+    chart: Chart,
+    user_offset_ms: i32,
+    mute_sfx: bool,
+    sfx_volume: Option<f32>,
+    countdown_ms: u32,
+    persist: Option<ScorePersist>,
+    narration: H,
+    opts: PlayOpts,
+) -> Result<Box<dyn juballer_core::Mode>> {
+    play_mode_inner(
+        chart,
+        user_offset_ms,
+        mute_sfx,
+        sfx_volume,
+        countdown_ms,
+        persist,
+        narration,
+        opts,
+    )
+}
+
+/// Legacy entry: builds a play mode + a one-shot App and runs it.
+/// Existing CLI subcommands still go through here; the picker now
+/// goes through [`build_play_mode`] + the active App's switcher.
 #[allow(clippy::too_many_arguments)]
 fn play_chart_inner<H: NarrationHook + 'static>(
     chart: Chart,
@@ -327,9 +358,41 @@ fn play_chart_inner<H: NarrationHook + 'static>(
     sfx_volume: Option<f32>,
     countdown_ms: u32,
     persist: Option<ScorePersist>,
-    mut narration: H,
+    narration: H,
     opts: PlayOpts,
 ) -> Result<()> {
+    let mode = build_play_mode(
+        chart,
+        user_offset_ms,
+        mute_sfx,
+        sfx_volume,
+        countdown_ms,
+        persist,
+        narration,
+        opts,
+    )?;
+    let mut app = App::builder()
+        .title("juballer — rhythm")
+        .present_mode(PresentMode::Fifo)
+        .bg_color(juballer_core::Color::BLACK)
+        .controller_vid_pid(0x1973, 0x0011)
+        .build()?;
+    app.set_debug(false);
+    app.run_modes(mode)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn play_mode_inner<H: NarrationHook + 'static>(
+    chart: Chart,
+    user_offset_ms: i32,
+    mute_sfx: bool,
+    sfx_volume: Option<f32>,
+    countdown_ms: u32,
+    persist: Option<ScorePersist>,
+    mut narration: H,
+    opts: PlayOpts,
+) -> Result<Box<dyn juballer_core::Mode>> {
     // Resolve shader path relative to CARGO_MANIFEST_DIR at build time; at run time
     // we probe for it under the crate root, falling back to the exe dir.
     let shader_path = resolve_shader_path();
@@ -376,14 +439,6 @@ fn play_chart_inner<H: NarrationHook + 'static>(
     if mute_sfx {
         tracing::info!(target: "juballer::rhythm", "hit sounds muted via --mute-sfx");
     }
-
-    let mut app = App::builder()
-        .title("juballer — rhythm")
-        .present_mode(PresentMode::Fifo)
-        .bg_color(juballer_core::Color::BLACK)
-        .controller_vid_pid(0x1973, 0x0011)
-        .build()?;
-    app.set_debug(false);
 
     let mut state = GameState::new(chart);
     state.no_fail = opts.no_fail;
@@ -460,7 +515,7 @@ fn play_chart_inner<H: NarrationHook + 'static>(
     let mut corner_downs: [Option<Instant>; 4] = [None; 4];
     let corners: [(u8, u8); 4] = [(0, 0), (0, 3), (3, 0), (3, 3)];
 
-    app.run_modes(juballer_core::closure_mode_with_switcher(
+    Ok(juballer_core::closure_mode_with_switcher(
         move |frame, events, switcher| {
             // Translate each input event, updating game state at the event's `ts`.
             let mut want_exit = false;
@@ -776,8 +831,7 @@ fn play_chart_inner<H: NarrationHook + 'static>(
                 switcher.exit();
             }
         },
-    ))?;
-    Ok(())
+    ))
 }
 
 /// Compute the music-time at the moment a winit/evdev input event arrived,

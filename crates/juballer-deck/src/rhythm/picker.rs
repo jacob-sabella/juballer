@@ -141,29 +141,9 @@ impl JacketCache {
     }
 }
 
-/// Re-exec the current process into `cmd`. On Unix this calls
-/// `CommandExt::exec` (the picker process is replaced). On Windows
-/// there is no in-place exec, so we spawn the child, wait for it, and
-/// exit with its status code.
-fn relaunch_or_exit(mut cmd: std::process::Command, err_label: &str) -> ! {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let err = cmd.exec();
-        tracing::error!(target: "juballer::rhythm::picker", "{err_label}: {err}");
-        std::process::exit(1);
-    }
-    #[cfg(not(unix))]
-    {
-        match cmd.status() {
-            Ok(status) => std::process::exit(status.code().unwrap_or(0)),
-            Err(err) => {
-                tracing::error!(target: "juballer::rhythm::picker", "{err_label}: {err}");
-                std::process::exit(1);
-            }
-        }
-    }
-}
+// `relaunch_or_exit` retired — the picker now switches to a play
+// mode in-process via `switcher.switch_to_boxed(build_play_mode(...))`
+// instead of exec'ing into a fresh juballer-deck process.
 
 fn load_jacket_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
     let bytes = match std::fs::read(path) {
@@ -832,12 +812,11 @@ pub fn pick(
     let exec_offset = user_offset_ms;
     let exec_mute_sfx = mute_sfx;
     let exec_sfx_volume = sfx_volume;
-    let exec_exe =
-        std::env::current_exe().map_err(|e| Error::Config(format!("current_exe: {e}")))?;
 
-    // Restore "last played" chart focus + page when present. Set by the
-    // picker's exec into a song; consumed (unset) here so it only fires
-    // for the immediate post-song return.
+    // Restore "last played" chart focus + page when present. Set by
+    // the picker's previous exec → play; obsolete now that picker
+    // switches modes in-process, but kept for backwards-compat with
+    // launches from outside the picker (deck → play directly).
     let last_chart_env = std::env::var("JUBALLER_LAST_CHART").ok();
     if last_chart_env.is_some() {
         std::env::remove_var("JUBALLER_LAST_CHART");
@@ -1212,35 +1191,48 @@ pub fn pick(
                                     entry.path.display(),
                                     diff,
                                 );
-                                // exec() replaces the process — nothing to clean
-                                // up after this call returns (which on success
-                                // it won't).
-                                //
-                                // Override the inherited RETURN_TO env so the
-                                // song's exit lands back in the picker (this
-                                // very pick() invocation, freshly re-exec'd)
-                                // with the same chart pre-focused. Pre-focus
-                                // is wired via JUBALLER_LAST_CHART, read at
-                                // picker init.
-                                let mut cmd = std::process::Command::new(&exec_exe);
-                                cmd.arg("play")
-                                    .arg(&entry.path)
-                                    .arg("--difficulty")
-                                    .arg(&diff)
-                                    .arg("--audio-offset-ms")
-                                    .arg(exec_offset.to_string())
-                                    .env("JUBALLER_RETURN_TO", "picker")
-                                    .env(
-                                        "JUBALLER_LAST_CHART",
-                                        entry.path.to_string_lossy().as_ref(),
-                                    );
-                                if exec_mute_sfx {
-                                    cmd.arg("--mute-sfx");
+                                // Build a play mode for this chart and ask
+                                // the App driver to swap us out for it on
+                                // the next frame. Same EventLoop, same
+                                // window, no exec — the picker drops here
+                                // (releasing its preview / scan caches) and
+                                // the play mode takes over.
+                                match crate::rhythm::chart::load(&entry.path, &diff) {
+                                    Ok(loaded_chart) => {
+                                        let persist = Some(crate::rhythm::ScorePersist::new(
+                                            &entry.path,
+                                            &diff,
+                                        ));
+                                        let play_opts = crate::rhythm::PlayOpts::default();
+                                        match crate::rhythm::build_play_mode(
+                                            loaded_chart,
+                                            exec_offset,
+                                            exec_mute_sfx,
+                                            exec_sfx_volume,
+                                            crate::rhythm::DEFAULT_COUNTDOWN_MS,
+                                            persist,
+                                            crate::rhythm::NoHook,
+                                            play_opts,
+                                        ) {
+                                            Ok(play_mode) => {
+                                                switcher.switch_to_boxed(play_mode);
+                                                return;
+                                            }
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    target: "juballer::rhythm::picker",
+                                                    "build_play_mode failed: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            target: "juballer::rhythm::picker",
+                                            "load_chart failed: {e}"
+                                        );
+                                    }
                                 }
-                                if let Some(v) = exec_sfx_volume {
-                                    cmd.arg("--sfx-volume").arg(format!("{v}"));
-                                }
-                                relaunch_or_exit(cmd, "exec failed");
                             }
                         }
                     }
@@ -1355,25 +1347,41 @@ pub fn pick(
                                             entry.path.display(),
                                             diff,
                                         );
-                                        let mut cmd = std::process::Command::new(&exec_exe);
-                                        cmd.arg("play")
-                                            .arg(&entry.path)
-                                            .arg("--difficulty")
-                                            .arg(&diff)
-                                            .arg("--audio-offset-ms")
-                                            .arg(exec_offset.to_string())
-                                            .env("JUBALLER_RETURN_TO", "picker")
-                                            .env(
-                                                "JUBALLER_LAST_CHART",
-                                                entry.path.to_string_lossy().as_ref(),
-                                            );
-                                        if exec_mute_sfx {
-                                            cmd.arg("--mute-sfx");
+                                        // Same in-process swap as the
+                                        // tap-launch path above.
+                                        match crate::rhythm::chart::load(&entry.path, &diff) {
+                                            Ok(loaded_chart) => {
+                                                let persist =
+                                                    Some(crate::rhythm::ScorePersist::new(
+                                                        &entry.path,
+                                                        &diff,
+                                                    ));
+                                                let play_opts = crate::rhythm::PlayOpts::default();
+                                                match crate::rhythm::build_play_mode(
+                                                    loaded_chart,
+                                                    exec_offset,
+                                                    exec_mute_sfx,
+                                                    exec_sfx_volume,
+                                                    crate::rhythm::DEFAULT_COUNTDOWN_MS,
+                                                    persist,
+                                                    crate::rhythm::NoHook,
+                                                    play_opts,
+                                                ) {
+                                                    Ok(play_mode) => {
+                                                        switcher.switch_to_boxed(play_mode);
+                                                        return;
+                                                    }
+                                                    Err(e) => tracing::error!(
+                                                        target: "juballer::rhythm::picker",
+                                                        "build_play_mode failed: {e}"
+                                                    ),
+                                                }
+                                            }
+                                            Err(e) => tracing::error!(
+                                                target: "juballer::rhythm::picker",
+                                                "load_chart failed: {e}"
+                                            ),
                                         }
-                                        if let Some(v) = exec_sfx_volume {
-                                            cmd.arg("--sfx-volume").arg(format!("{v}"));
-                                        }
-                                        relaunch_or_exit(cmd, "exec failed");
                                     }
                                 }
                             }
