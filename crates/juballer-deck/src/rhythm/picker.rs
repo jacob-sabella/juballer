@@ -835,16 +835,6 @@ pub fn pick(
     let exec_exe =
         std::env::current_exe().map_err(|e| Error::Config(format!("current_exe: {e}")))?;
 
-    // Best-score-per-tile lookup, keyed by global index into the
-    // paginator's full item list. Missing book = all None.
-    let best_scores: Vec<Option<u64>> = (0..paginator.total())
-        .map(|i| {
-            let e = paginator.items_on_page(i / CHART_CELLS_PER_PAGE);
-            let entry = &e[i % CHART_CELLS_PER_PAGE];
-            book.best(&entry.path, difficulty).map(|r| r.score)
-        })
-        .collect();
-
     // Restore "last played" chart focus + page when present. Set by the
     // picker's exec into a song; consumed (unset) here so it only fires
     // for the immediate post-song return.
@@ -919,9 +909,14 @@ pub fn pick(
         }
 
         let current_entries = paginator.current_items().to_vec();
-        let page_offset = paginator.current_page() * CHART_CELLS_PER_PAGE;
-        let page_best_scores: Vec<Option<u64>> = (0..current_entries.len())
-            .map(|i| best_scores.get(page_offset + i).copied().flatten())
+        // Per-tile best score for the active difficulty. Looked up
+        // fresh from the score book each frame (HashMap, ~O(12) per
+        // paint) so filter/sort changes are reflected immediately —
+        // the previously-cached best_scores Vec went stale on every
+        // paginator rebuild because its indices were positional.
+        let page_best_scores: Vec<Option<u64>> = current_entries
+            .iter()
+            .map(|e| book.best(&e.path, &exec_default_diff).map(|r| r.score))
             .collect();
 
         paint_backgrounds(
