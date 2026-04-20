@@ -33,6 +33,7 @@
 pub mod capture;
 pub mod carxp;
 pub mod config;
+pub mod discover;
 pub mod dispatch;
 pub mod listener;
 pub mod names;
@@ -70,7 +71,18 @@ pub fn run(path: &Path) -> Result<()> {
     let live_listener = listener::spawn(rt.handle(), target).ok();
     let live_feed = live_listener.as_ref().map(listener::CarlaListener::feed);
 
-    let names = match cfg.carla.project.as_ref() {
+    let project_path = cfg.carla.project.clone().or_else(|| {
+        let auto = discover::detect_running_project();
+        if let Some(p) = &auto {
+            tracing::info!(
+                target: "juballer::carla",
+                "auto-detected running carla project: {}",
+                p.display()
+            );
+        }
+        auto
+    });
+    let names = match project_path.as_ref() {
         Some(path) => match carxp::CarlaProject::load(path) {
             Ok(project) => {
                 let map = names::NameMap::from_project(&project);
@@ -92,7 +104,13 @@ pub fn run(path: &Path) -> Result<()> {
                 names::NameMap::empty()
             }
         },
-        None => names::NameMap::empty(),
+        None => {
+            tracing::info!(
+                target: "juballer::carla",
+                "no [carla].project set + no running carla detected; named refs will not resolve"
+            );
+            names::NameMap::empty()
+        }
     };
 
     let mut state = state::CarlaState::new(cfg);

@@ -64,6 +64,11 @@ impl CarlaClient {
     pub fn spawn(rt: &tokio::runtime::Handle, target: SocketAddr) -> Result<Self> {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
+        // tokio::net::UdpSocket::from_std needs the runtime context so
+        // its I/O reactor can register the fd; enter() guard handles
+        // the case where the caller is on a non-tokio thread (e.g. the
+        // CLI main thread, the deck event loop).
+        let _guard = rt.enter();
         let socket = UdpSocket::from_std(socket)?;
 
         let (tx, mut rx) = mpsc::channel::<OscCommand>(COMMAND_QUEUE_DEPTH);
