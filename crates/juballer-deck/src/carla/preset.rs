@@ -19,7 +19,6 @@
 use crate::carla::config::{Preset, PresetParam};
 use crate::carla::osc::CarlaClient;
 use crate::Result;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// One scanned preset file plus the category it lives in.
@@ -48,12 +47,14 @@ impl PresetEntry {
     }
 }
 
-/// In-memory index of every preset under the library root, keyed by
-/// display name. Built once at carla-mode startup and never mutated;
-/// re-scan on demand if the user adds presets while the deck is open.
+/// In-memory index of every preset under the library root. Stored
+/// as a flat Vec because Neural-DSP libraries reuse the same display
+/// name across many directories ("Lead", "Rhythm", "High Gain Lead"
+/// across every Artist folder, every plugin pack). Lookups are
+/// linear scans — at ~600 entries that's still micro-second.
 #[derive(Debug, Default, Clone)]
 pub struct PresetLibrary {
-    by_name: HashMap<String, PresetEntry>,
+    entries: Vec<PresetEntry>,
 }
 
 impl PresetLibrary {
@@ -63,30 +64,43 @@ impl PresetLibrary {
 
     pub fn from_root(root: &Path) -> Self {
         Self {
-            by_name: scan_directory(root),
+            entries: scan_directory(root),
         }
     }
 
+    /// Scan a primary root plus any number of `extra_roots`. Useful
+    /// for plumbing `[carla].extra_preset_roots` into the library so
+    /// the operator can surface preset folders kept outside the
+    /// juballer config tree (Neural-DSP downloads, Bandlab exports).
+    pub fn from_roots(root: &Path, extra_roots: &[std::path::PathBuf]) -> Self {
+        let mut entries = scan_directory(root);
+        for extra in extra_roots {
+            entries.extend(scan_directory(extra));
+        }
+        Self { entries }
+    }
+
     pub fn len(&self) -> usize {
-        self.by_name.len()
+        self.entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.by_name.is_empty()
+        self.entries.is_empty()
     }
 
+    /// First entry whose display name matches `name`. Linear scan.
     pub fn get(&self, name: &str) -> Option<&PresetEntry> {
-        self.by_name.get(name)
+        self.entries.iter().find(|e| e.name() == name)
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &PresetEntry> {
-        self.by_name.values()
+        self.entries.iter()
     }
 
     /// Sorted entries (by case-insensitive name). Used by the preset
     /// picker overlay.
     pub fn sorted(&self) -> Vec<PresetEntry> {
-        let mut out: Vec<PresetEntry> = self.by_name.values().cloned().collect();
+        let mut out: Vec<PresetEntry> = self.entries.clone();
         out.sort_by_key(|e| e.name().to_lowercase());
         out
     }
@@ -94,8 +108,8 @@ impl PresetLibrary {
     /// Subset filtered by an exact category match.
     pub fn by_category(&self, category: &str) -> Vec<PresetEntry> {
         let mut out: Vec<PresetEntry> = self
-            .by_name
-            .values()
+            .entries
+            .iter()
             .filter(|e| e.category.as_deref() == Some(category))
             .cloned()
             .collect();
@@ -106,7 +120,7 @@ impl PresetLibrary {
     /// Distinct category names present in the library, sorted.
     pub fn categories(&self) -> Vec<String> {
         let mut set = std::collections::BTreeSet::new();
-        for e in self.by_name.values() {
+        for e in &self.entries {
             if let Some(c) = &e.category {
                 set.insert(c.clone());
             }
@@ -115,17 +129,24 @@ impl PresetLibrary {
     }
 }
 
-/// Recursively walk `root` for `*.preset.toml` files. Each subdirectory
-/// becomes a category; files at the root have no category. Files that
-/// fail to parse log once and are skipped — a single malformed preset
-/// never blocks the rest of the library.
-fn scan_directory(root: &Path) -> HashMap<String, PresetEntry> {
-    let mut out: HashMap<String, PresetEntry> = HashMap::new();
-    walk(root, root, &mut out);
+/// Recursively walk `root` for `*.preset.toml` and `*.carxs` files.
+/// Each subdirectory becomes a category; files at the root have no
+/// category. Files that fail to parse log once and are skipped — a
+/// single malformed preset never blocks the rest of the library.
+///
+/// Recursion is bounded ([`MAX_SCAN_DEPTH`]) and hidden directories
+/// (`.git`, `.cache`, …) are skipped so the operator can point
+/// `extra_preset_roots` at a generic dir like `~/` without us
+/// crawling the entire home tree.
+fn scan_directory(root: &Path) -> Vec<PresetEntry> {
+    let mut out: Vec<PresetEntry> = Vec::new();
+    walk(root, root, 0, &mut out);
     out
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut HashMap<String, PresetEntry>) {
+const MAX_SCAN_DEPTH: usize = 4;
+
+fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<PresetEntry>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -140,29 +161,37 @@ fn walk(root: &Path, dir: &Path, out: &mut HashMap<String, PresetEntry>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            walk(root, &path, out);
+            if depth >= MAX_SCAN_DEPTH {
+                continue;
+            }
+            // Skip dotfile directories — these are usually unrelated
+            // (caches, vcs metadata) and trying to descend into them
+            // turns "scan ~/" into "scan literally everything".
+            if path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.starts_with('.'))
+            {
+                continue;
+            }
+            walk(root, &path, depth + 1, out);
             continue;
         }
-        if !is_preset_file(&path) {
+        let loaded = if is_juballer_preset(&path) {
+            Preset::load(&path)
+        } else if is_carxs(&path) {
+            crate::carla::carxs::CarlaXsPreset::load(&path).map(Preset::from)
+        } else {
             continue;
-        }
-        match Preset::load(&path) {
+        };
+        match loaded {
             Ok(preset) => {
                 let category = derive_category(root, &path);
-                let entry = PresetEntry {
+                out.push(PresetEntry {
                     path: path.clone(),
                     category,
                     preset,
-                };
-                let key = entry.name();
-                if let Some(prev) = out.insert(key.clone(), entry) {
-                    tracing::warn!(
-                        target: "juballer::carla::preset",
-                        "duplicate preset name {key:?}: {} overrides {}",
-                        path.display(),
-                        prev.path.display()
-                    );
-                }
+                });
             }
             Err(e) => {
                 tracing::warn!(
@@ -175,10 +204,14 @@ fn walk(root: &Path, dir: &Path, out: &mut HashMap<String, PresetEntry>) {
     }
 }
 
-fn is_preset_file(path: &Path) -> bool {
+fn is_juballer_preset(path: &Path) -> bool {
     path.file_name()
         .and_then(|s| s.to_str())
         .is_some_and(|s| s.ends_with(".preset.toml"))
+}
+
+fn is_carxs(path: &Path) -> bool {
+    path.extension().and_then(|s| s.to_str()) == Some("carxs")
 }
 
 /// Derive a category name from the relative path between `root` and
@@ -246,6 +279,13 @@ pub fn apply(
         // U+FFFD; better than refusing to emit on non-UTF-8 paths.
         let value = file.path.to_string_lossy().into_owned();
         client.set_custom_data(&plugin_ref, "string", &file.key, &value);
+        emitted += 1;
+    }
+    if let Some(chunk) = &entry.preset.chunk {
+        // VST2 / VST3 plugins ship a base64 chunk with their entire
+        // internal state. set_chunk does the heavy lifting; the
+        // plugin's own deserializer interprets the bytes.
+        client.set_chunk(&plugin_ref, chunk);
         emitted += 1;
     }
     tracing::info!(
@@ -337,14 +377,18 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_name_in_different_categories_overrides_with_warning() {
+    fn same_name_in_different_categories_keeps_both_entries() {
         let dir = tempfile::tempdir().unwrap();
         write_preset(&dir.path().join("a"), "x", &minimal("Same", "A"));
         write_preset(&dir.path().join("b"), "x", &minimal("Same", "B"));
         let lib = PresetLibrary::from_root(dir.path());
-        // Map insertion order is non-deterministic; just confirm the
-        // de-dup didn't lose the entry entirely.
-        assert_eq!(lib.len(), 1);
+        // Both presets land in the library because dedup is gone.
+        assert_eq!(lib.len(), 2);
+        // Bare-name `get` finds *some* match (the first by scan order).
+        assert!(lib.get("Same").is_some());
+        // by_category disambiguates.
+        assert_eq!(lib.by_category("a").len(), 1);
+        assert_eq!(lib.by_category("b").len(), 1);
     }
 
     #[test]
@@ -394,6 +438,7 @@ mod tests {
                     key: "ir".into(),
                     path: PathBuf::from("/srv/ir/marshall.wav"),
                 }],
+                chunk: None,
             },
         }
     }

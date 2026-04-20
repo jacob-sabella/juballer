@@ -53,6 +53,13 @@ pub(crate) enum OscCommand {
         key: String,
         value: String,
     },
+    /// `/Carla/<plugin>/set_chunk <s:base64>`. Used by VST2 / VST3
+    /// preset application — the plugin restores its own state from
+    /// the chunk blob.
+    SetChunk {
+        plugin_id: u32,
+        chunk: String,
+    },
     Shutdown,
 }
 
@@ -116,6 +123,19 @@ impl CarlaClient {
             return;
         };
         self.send(OscCommand::SetProgram { plugin_id, program });
+    }
+
+    /// `/Carla/<plugin>/set_chunk <string base64>`. Used by Phase 5.2
+    /// preset application — restores a VST2 / VST3 plugin's full
+    /// internal state from the base64 blob the .carxs file ships.
+    pub fn set_chunk(&self, plugin: &PluginRef, chunk: &str) {
+        let Some(plugin_id) = resolve_index(plugin, "plugin") else {
+            return;
+        };
+        self.send(OscCommand::SetChunk {
+            plugin_id,
+            chunk: chunk.to_string(),
+        });
     }
 
     /// `/Carla/<plugin>/set_custom_data <string type> <string key>
@@ -188,6 +208,10 @@ fn encode_command(cmd: &OscCommand) -> Option<OscPacket> {
                 OscType::String(key.clone()),
                 OscType::String(value.clone()),
             ],
+        },
+        OscCommand::SetChunk { plugin_id, chunk } => OscMessage {
+            addr: format!("/Carla/{plugin_id}/set_chunk"),
+            args: vec![OscType::String(chunk.clone())],
         },
         OscCommand::Shutdown => return None,
     };

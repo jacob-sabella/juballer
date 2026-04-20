@@ -32,6 +32,7 @@
 
 pub mod capture;
 pub mod carxp;
+pub mod carxs;
 pub mod config;
 pub mod discover;
 pub mod dispatch;
@@ -117,7 +118,8 @@ pub fn run(path: &Path) -> Result<()> {
     let mut press_starts: HashMap<(u8, u8), Instant> = HashMap::new();
     let configs_dir = config::default_configs_dir();
     let presets_dir = preset::default_root();
-    let presets = preset::PresetLibrary::from_root(&presets_dir);
+    let extra_roots = state.config().carla.extra_preset_roots.clone();
+    let presets = preset::PresetLibrary::from_roots(&presets_dir, &extra_roots);
     if presets.is_empty() {
         tracing::info!(
             target: "juballer::carla",
@@ -505,6 +507,7 @@ mod tests {
             host: "no-such-host.invalid.juballer-test".into(),
             port: 22752,
             project: None,
+            extra_preset_roots: Vec::new(),
         };
         let err = resolve_target(&t).unwrap_err();
         let msg = err.to_string();

@@ -183,6 +183,7 @@ fn build_preset(
         target_plugin,
         params,
         files: Vec::new(),
+        chunk: None,
     }
 }
 

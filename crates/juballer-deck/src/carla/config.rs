@@ -65,9 +65,18 @@ pub struct CarlaTarget {
     /// the runtime parses it at startup to build a name → index map
     /// so cell bindings can use friendlier `plugin = "GxTuner"` and
     /// `param = "FREQ"` strings instead of numeric slot indices.
-    /// When omitted, only numeric refs resolve.
+    /// When omitted, the runtime auto-detects a running Carla process
+    /// from `/proc` and falls back to its launch-time project file.
+    /// Setting this explicitly skips the auto-detect.
     #[serde(default)]
     pub project: Option<PathBuf>,
+    /// Additional directories to scan for preset files (`*.preset.toml`
+    /// and `*.carxs`). The default presets root
+    /// (`<config>/carla/presets/`) is always scanned; extras let the
+    /// operator surface a Neural-DSP preset folder, a Bandlab
+    /// download, etc., without copying files.
+    #[serde(default)]
+    pub extra_preset_roots: Vec<PathBuf>,
 }
 
 impl Default for CarlaTarget {
@@ -76,6 +85,7 @@ impl Default for CarlaTarget {
             host: DEFAULT_CARLA_HOST.to_string(),
             port: DEFAULT_CARLA_PORT,
             project: None,
+            extra_preset_roots: Vec::new(),
         }
     }
 }
@@ -309,6 +319,12 @@ pub struct Preset {
     /// sample banks, etc). Applied via `/Carla/<plugin>/set_custom_data`.
     #[serde(default, rename = "file")]
     pub files: Vec<PresetFile>,
+    /// Base64-encoded plugin chunk for VST2 / VST3 / proprietary
+    /// formats. Carla applies it via `/Carla/<plugin>/set_chunk`.
+    /// Native types (LV2 / INTERNAL) ignore this and use the param
+    /// list instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -511,9 +527,9 @@ impl DisplayBinding {
                 }
             }
             DisplayMode::Meter => {
-                if self.source_param.is_none() {
-                    need("source_param", &mut errs);
-                }
+                // source_param is optional — when absent, the
+                // renderer falls back to /Carla/peaks for the
+                // configured plugin slot.
             }
             DisplayMode::Value | DisplayMode::Text => {
                 if self.source_param.is_none() {
