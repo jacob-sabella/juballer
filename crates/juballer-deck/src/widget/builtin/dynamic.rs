@@ -235,9 +235,9 @@ fn render_node(ui: &mut egui::Ui, node: &ViewNode, cx: &RenderCx<'_>) {
         } => {
             let fill = parse_color(color).unwrap_or(egui::Color32::TRANSPARENT);
             let rad = rounding.unwrap_or(0.0);
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(fill)
-                .rounding(egui::Rounding::same((rad) as u8))
+                .corner_radius(egui::CornerRadius::same((rad) as u8))
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| render_node(ui, child, cx));
         }
@@ -433,7 +433,7 @@ fn render_plot(
     let painter = ui.painter_at(rect);
     painter.rect_filled(
         rect,
-        egui::Rounding::same(2),
+        egui::CornerRadius::same(2),
         egui::Color32::from_rgba_unmultiplied(0x1e, 0x1e, 0x2e, 128),
     );
     if values.len() >= 2 {
@@ -638,7 +638,9 @@ mod tests {
 
         let data_url = format!("data:image/png;base64,{}", B64.encode(png_1x1()));
 
+        #[allow(deprecated)]
         let _ = ctx.run(raw_input, |ctx| {
+            #[allow(deprecated)]
             egui::CentralPanel::default().show(ctx, |ui| {
                 let rcx = RenderCx {
                     bus: &bus,

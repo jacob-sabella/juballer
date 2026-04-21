@@ -276,7 +276,7 @@ fn paint_tile(
     shader_err: Option<&str>,
 ) {
     let rect = ui.max_rect();
-    let rounding = egui::Rounding::same(10);
+    let rounding = egui::CornerRadius::same(10);
     let tile_rect = rect.shrink(2.0);
     let is_bound = bound.is_some();
 
@@ -372,9 +372,9 @@ fn paint_tile(
     );
     painter.rect_filled(
         hi,
-        egui::Rounding {
-            nw: (rounding.nw) as u8,
-            ne: (rounding.ne) as u8,
+        egui::CornerRadius {
+            nw: rounding.nw,
+            ne: rounding.ne,
             sw: 0,
             se: 0,
         },
@@ -386,11 +386,11 @@ fn paint_tile(
     );
     painter.rect_filled(
         lo,
-        egui::Rounding {
+        egui::CornerRadius {
             nw: 0,
             ne: 0,
-            sw: (rounding.sw) as u8,
-            se: (rounding.se) as u8,
+            sw: rounding.sw,
+            se: rounding.se,
         },
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 34),
     );
@@ -440,7 +440,7 @@ fn paint_tile(
         let a = primary_accent;
         painter.rect_stroke(
             tile_rect.shrink(4.0),
-            egui::Rounding::same(8),
+            egui::CornerRadius::same(8),
             egui::Stroke::new(
                 1.0,
                 egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 70),
@@ -470,7 +470,7 @@ fn paint_tile(
                 let ring_alpha = ((1.0 - progress) * base_alpha as f32) as u8;
                 painter.rect_stroke(
                     ring_rect,
-                    egui::Rounding::same((10.0 + ring_grow) as u8),
+                    egui::CornerRadius::same((10.0 + ring_grow) as u8),
                     egui::Stroke::new(
                         1.5,
                         egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), ring_alpha),
@@ -578,7 +578,7 @@ fn paint_tile(
         );
         ui.painter().rect_filled(
             bar,
-            egui::Rounding::same((bar_h * 0.5) as u8),
+            egui::CornerRadius::same((bar_h * 0.5) as u8),
             egui::Color32::from_rgba_premultiplied(accent.0, accent.1, accent.2, accent.3),
         );
     }
@@ -592,7 +592,7 @@ fn paint_tile(
         );
         ui.painter().rect_filled(
             badge,
-            egui::Rounding::same(4),
+            egui::CornerRadius::same(4),
             egui::Color32::from_rgba_unmultiplied(220, 40, 40, 230),
         );
         let mut short = err.replace('\n', " ");
@@ -655,7 +655,7 @@ fn tint(c: egui::Color32, other: egui::Color32, amt: f32) -> egui::Color32 {
 fn paint_vertical_gradient(
     painter: &egui::Painter,
     rect: egui::Rect,
-    rounding: egui::Rounding,
+    rounding: egui::CornerRadius,
     top: egui::Color32,
     bottom: egui::Color32,
 ) {
@@ -669,21 +669,21 @@ fn paint_vertical_gradient(
         let y1 = y0 + h;
         let r = egui::Rect::from_min_max(egui::pos2(rect.min.x, y0), egui::pos2(rect.max.x, y1));
         let rd = if i == 0 {
-            egui::Rounding {
-                nw: (rounding.nw) as u8,
-                ne: (rounding.ne) as u8,
+            egui::CornerRadius {
+                nw: rounding.nw,
+                ne: rounding.ne,
                 sw: 0,
                 se: 0,
             }
         } else if i == STRIPS - 1 {
-            egui::Rounding {
+            egui::CornerRadius {
                 nw: 0,
                 ne: 0,
-                sw: (rounding.sw) as u8,
-                se: (rounding.se) as u8,
+                sw: rounding.sw,
+                se: rounding.se,
             }
         } else {
-            egui::Rounding::ZERO
+            egui::CornerRadius::ZERO
         };
         painter.rect_filled(r, rd, col);
     }
@@ -697,7 +697,7 @@ fn paint_icon_halo(painter: &egui::Painter, rect: egui::Rect, accent: egui::Colo
         let rr = egui::Rect::from_center_size(center, egui::vec2(r * 2.0, r * 2.0));
         painter.rect_filled(
             rr,
-            egui::Rounding::same((r) as u8),
+            egui::CornerRadius::same((r) as u8),
             egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha),
         );
     }
@@ -743,7 +743,7 @@ fn paint_corner_ribbon(
     );
     painter.rect_filled(
         ribbon,
-        egui::Rounding::same((h * 0.5) as u8),
+        egui::CornerRadius::same((h * 0.5) as u8),
         egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 220),
     );
     painter.text(
@@ -766,14 +766,14 @@ fn paint_toggle_pill(painter: &egui::Painter, rect: egui::Rect, accent: egui::Co
     );
     painter.rect_filled(
         bar,
-        egui::Rounding::same((bar_h * 0.5) as u8),
+        egui::CornerRadius::same((bar_h * 0.5) as u8),
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60),
     );
-    painter.rect_filled(bar, egui::Rounding::same((bar_h * 0.5) as u8), accent);
+    painter.rect_filled(bar, egui::CornerRadius::same((bar_h * 0.5) as u8), accent);
     let hi = egui::Rect::from_min_max(bar.min, egui::pos2(bar.max.x, bar.min.y + bar_h * 0.45));
     painter.rect_filled(
         hi,
-        egui::Rounding {
+        egui::CornerRadius {
             nw: (bar_h * 0.5) as u8,
             ne: (bar_h * 0.5) as u8,
             sw: 0,
@@ -808,7 +808,7 @@ fn truncate_mid(s: &str, max: usize) -> String {
 fn paint_dashed_rect(
     painter: &egui::Painter,
     rect: egui::Rect,
-    rounding: egui::Rounding,
+    rounding: egui::CornerRadius,
     color: egui::Color32,
     dash: f32,
     gap: f32,

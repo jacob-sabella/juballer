@@ -165,6 +165,8 @@ impl EguiOverlay {
         // `ctx.run` takes `FnMut`; wrap the `FnOnce` builder in an Option and `take()` it
         // so it runs exactly once while still satisfying the `FnMut` bound.
         let mut builder_opt = Some(builder);
+        #[allow(deprecated)] // egui 0.34 pushes run_ui, but that callback gets &mut Ui; our
+        // builder composes Areas against a &Context, which only ctx.run provides.
         let full_output = self.ctx.run(raw_input, |ctx| {
             if let Some(b) = builder_opt.take() {
                 let mut rc = RegionCtx {
@@ -274,7 +276,7 @@ mod tests {
     fn bundled_fonts_cover_key_codepoints() {
         let overlay = EguiOverlay::new();
         // Drive the context once so fonts get loaded (set_fonts is lazy).
-        let _ = overlay.ctx.run(egui::RawInput::default(), |_| {});
+        let _ = overlay.ctx.run_ui(egui::RawInput::default(), |_| {});
 
         let font_id = egui::FontId::proportional(16.0);
         let expected_covered: &[(char, &str)] = &[

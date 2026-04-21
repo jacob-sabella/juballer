@@ -192,7 +192,7 @@ fn paint_sparkline(
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 14.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, egui::Rounding::same(2), track_color);
+    painter.rect_filled(rect, egui::CornerRadius::same(2), track_color);
     if samples.len() < 2 {
         return;
     }

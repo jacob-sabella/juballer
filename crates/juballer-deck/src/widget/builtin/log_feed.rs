@@ -115,7 +115,7 @@ impl Widget for LogFeedWidget {
                     let s = theme.surface1;
                     ui.painter().rect_filled(
                         rect,
-                        egui::Rounding::same(3),
+                        egui::CornerRadius::same(3),
                         egui::Color32::from_rgba_unmultiplied(s.r(), s.g(), s.b(), 100),
                     );
                 }

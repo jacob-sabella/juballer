@@ -50,7 +50,7 @@ impl Widget for ActionMiniWidget {
         let theme = cx.theme;
         let rect = ui.max_rect();
         let tile = rect.shrink(3.0);
-        let rounding = egui::Rounding::same((CARD_RADIUS) as u8);
+        let rounding = egui::CornerRadius::same((CARD_RADIUS) as u8);
 
         let resp = ui.allocate_rect(rect, egui::Sense::click());
         let painter = ui.painter();
