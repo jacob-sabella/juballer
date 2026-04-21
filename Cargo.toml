@@ -27,7 +27,7 @@ thiserror = "1.0"
 crossbeam-channel = "0.5"
 indexmap = { version = "2", features = ["serde"] }
 bytemuck = { version = "1", features = ["derive"] }
-glam = "0.29"
+glam = "0.32"
 log = "0.4"
 env_logger = "0.11"
 raw-window-handle = "0.6"
