@@ -136,9 +136,12 @@ impl EguiOverlay {
             self.renderer = Some(Renderer::new(
                 frame.device(),
                 frame.format(),
-                None,  // no depth
-                1,     // msaa samples
-                false, // dither
+                egui_wgpu::RendererOptions {
+                    msaa_samples: 1,
+                    depth_stencil_format: None,
+                    dithering: false,
+                    predictable_texture_filtering: false,
+                },
             ));
         }
     }
@@ -291,7 +294,7 @@ mod tests {
         ];
 
         let mut missing: Vec<(char, &str)> = Vec::new();
-        overlay.ctx.fonts(|fonts| {
+        overlay.ctx.fonts_mut(|fonts| {
             for &(c, name) in expected_covered {
                 if !fonts.has_glyph(&font_id, c) {
                     missing.push((c, name));
@@ -312,7 +315,7 @@ mod tests {
         // want to know — likely means `has_glyph` semantics changed.
         let pua_covered = overlay
             .ctx
-            .fonts(|fonts| fonts.has_glyph(&font_id, '\u{E000}'));
+            .fonts_mut(|fonts| fonts.has_glyph(&font_id, '\u{E000}'));
         assert!(
             !pua_covered,
             "Private Use Area U+E000 was reported as covered — test logic is unsound (false positives possible)"

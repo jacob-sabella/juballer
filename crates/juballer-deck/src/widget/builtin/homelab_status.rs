@@ -156,7 +156,7 @@ impl Widget for HomelabStatusWidget {
                     let bg = theme.surface1;
                     ui.painter().rect_filled(
                         row,
-                        egui::Rounding::same(3.0),
+                        egui::Rounding::same(3),
                         egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 100),
                     );
                 }

@@ -576,7 +576,7 @@ pub fn draw_countdown(frame: &mut Frame, overlay: &mut EguiOverlay, ms_until_sta
                 let backdrop_alpha = (alpha / 2).min(110);
                 painter.rect_filled(
                     rect,
-                    egui::Rounding::same(8.0),
+                    egui::Rounding::same(8),
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, backdrop_alpha),
                 );
                 painter.text(
@@ -764,7 +764,7 @@ pub fn draw_hud_with_narration(
                 // Translucent backdrop so text stays legible over any background.
                 painter.rect_filled(
                     rect,
-                    egui::Rounding::same(6.0),
+                    egui::Rounding::same(6),
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
                 );
 
@@ -835,7 +835,7 @@ pub fn draw_hud_with_narration(
                     );
                     painter.rect_filled(
                         n_rect,
-                        egui::Rounding::same(4.0),
+                        egui::Rounding::same(4),
                         egui::Color32::from_rgba_unmultiplied(20, 30, 50, 200),
                     );
                     painter.text(
@@ -866,7 +866,7 @@ pub fn draw_hud_with_narration(
                 );
                 painter.rect_filled(
                     life_rect,
-                    egui::Rounding::same(3.0),
+                    egui::Rounding::same(3),
                     egui::Color32::from_rgba_unmultiplied(30, 30, 30, 220),
                 );
                 let fill_w = life_rect.width() * life.clamp(0.0, 1.0);
@@ -877,15 +877,14 @@ pub fn draw_hud_with_narration(
                     );
                     painter.rect_filled(
                         fill_rect,
-                        egui::Rounding::same(3.0),
+                        egui::Rounding::same(3),
                         life_bar_color(life),
                     );
                 }
                 painter.rect_stroke(
                     life_rect,
-                    egui::Rounding::same(3.0),
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(180)),
-                );
+                    egui::Rounding::same(3),
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(180)), egui::StrokeKind::Middle);
 
                 // Jacket tile (top-right) — 120×120 when present. Painted
                 // before the BPM/time/judged block so the text overlays
@@ -997,7 +996,7 @@ pub fn draw_hud_with_narration(
 
                 if failed {
                     let banner = egui::Color32::from_rgba_unmultiplied(40, 6, 6, 235);
-                    painter.rect_filled(rect, egui::Rounding::same(6.0), banner);
+                    painter.rect_filled(rect, egui::Rounding::same(6), banner);
                     painter.text(
                         rect.center() - egui::vec2(0.0, 16.0),
                         egui::Align2::CENTER_CENTER,
@@ -1021,7 +1020,7 @@ pub fn draw_hud_with_narration(
                     );
                 } else if finished {
                     let banner = egui::Color32::from_rgba_unmultiplied(10, 10, 10, 230);
-                    painter.rect_filled(rect, egui::Rounding::same(6.0), banner);
+                    painter.rect_filled(rect, egui::Rounding::same(6), banner);
 
                     let accuracy = state.accuracy_pct().unwrap_or(0.0);
                     let mean_off = state.mean_input_offset_ms();
@@ -1141,14 +1140,13 @@ pub fn draw_hud_with_narration(
                             );
                             painter.rect_filled(
                                 er,
-                                egui::Rounding::same(6.0),
+                                egui::Rounding::same(6),
                                 egui::Color32::from_rgba_unmultiplied(20, 22, 30, 220),
                             );
                             painter.rect_stroke(
                                 er,
-                                egui::Rounding::same(6.0),
-                                egui::Stroke::new(1.5, fg),
-                            );
+                                egui::Rounding::same(6),
+                                egui::Stroke::new(1.5, fg), egui::StrokeKind::Middle);
                             super::textfx::text_outlined(
                                 &painter,
                                 er.center() + egui::vec2(0.0, -10.0),
@@ -1175,7 +1173,7 @@ pub fn draw_hud_with_narration(
                         );
                         painter.rect_filled(
                             er,
-                            egui::Rounding::same(6.0),
+                            egui::Rounding::same(6),
                             egui::Color32::from_rgba_unmultiplied(20, 22, 30, 220),
                         );
                         super::textfx::text_outlined(

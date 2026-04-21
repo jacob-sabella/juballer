@@ -18,9 +18,9 @@ repository = "https://github.com/jacob-sabella/juballer"
 
 [workspace.dependencies]
 winit = "0.30"
-wgpu = "23"
-egui = "0.30"
-egui-wgpu = "0.30"
+wgpu = "29"
+egui = "0.34"
+egui-wgpu = "0.34"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 thiserror = "1.0"

@@ -2087,7 +2087,7 @@ fn draw_overlay(
                 let rect = ui.max_rect();
                 painter.rect_filled(
                     rect,
-                    egui::Rounding::same(6.0),
+                    egui::Rounding::same(6),
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
                 );
                 match focused_entry.as_ref() {
@@ -2136,12 +2136,11 @@ fn draw_overlay(
                                 painter.image(tex.id(), art_rect, uv, egui::Color32::WHITE);
                                 painter.rect_stroke(
                                     art_rect,
-                                    egui::Rounding::same(4.0),
+                                    egui::Rounding::same(4),
                                     egui::Stroke::new(
                                         1.0,
                                         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80),
-                                    ),
-                                );
+                                    ), egui::StrokeKind::Middle);
                                 text_right = art_rect.left() - 12.0;
                             }
                         }
@@ -2326,7 +2325,7 @@ fn draw_overlay(
                     // panel).
                     painter.rect_filled(
                         tile_rect,
-                        egui::Rounding::same(4.0),
+                        egui::Rounding::same(4),
                         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 90),
                     );
                 }
@@ -2353,7 +2352,7 @@ fn draw_overlay(
                     );
                     painter.rect_filled(
                         panel_rect,
-                        egui::Rounding::same(5.0),
+                        egui::Rounding::same(5),
                         egui::Color32::from_rgba_unmultiplied(20, 22, 30, 170),
                     );
                     // ★ marker for favorited charts — top-right of the
@@ -2370,12 +2369,11 @@ fn draw_overlay(
                     }
                     painter.rect_stroke(
                         panel_rect,
-                        egui::Rounding::same(5.0),
+                        egui::Rounding::same(5),
                         egui::Stroke::new(
                             1.0,
                             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 45),
-                        ),
-                    );
+                        ), egui::StrokeKind::Middle);
                     super::textfx::text_outlined(
                         &painter,
                         anchor + egui::vec2(0.0, 0.0),
@@ -2687,12 +2685,12 @@ fn draw_filter_overlay(
                     // white-stroke. No second pass, no overdraw.
                     painter.rect_filled(
                         panel_rect,
-                        egui::Rounding::same(5.0),
+                        egui::Rounding::same(5),
                         egui::Color32::from_rgba_unmultiplied(20, 22, 30, 170),
                     );
                     painter.rect_stroke(
                         panel_rect,
-                        egui::Rounding::same(5.0),
+                        egui::Rounding::same(5),
                         egui::Stroke::new(
                             1.0,
                             egui::Color32::from_rgba_unmultiplied(
@@ -2701,8 +2699,7 @@ fn draw_filter_overlay(
                                 tile.accent.b(),
                                 90,
                             ),
-                        ),
-                    );
+                        ), egui::StrokeKind::Middle);
                     super::textfx::text_outlined(
                         &painter,
                         panel_rect.left_top() + egui::vec2(8.0, 6.0),

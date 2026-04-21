@@ -125,7 +125,7 @@ where
         mapped_at_creation: false,
     });
     enc.copy_texture_to_buffer(
-        wgpu::ImageCopyTexture {
+        wgpu::TexelCopyTextureInfo {
             texture: &final_tex,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
@@ -133,7 +133,7 @@ where
         },
         wgpu::ImageCopyBuffer {
             buffer: &buf,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row),
                 rows_per_image: Some(height),

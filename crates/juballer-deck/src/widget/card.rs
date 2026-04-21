@@ -35,20 +35,20 @@ pub fn draw_card(
     if rect.width() < 4.0 || rect.height() < 4.0 {
         return;
     }
-    let rounding = egui::Rounding::same(CARD_RADIUS);
+    let rounding = egui::Rounding::same((CARD_RADIUS) as u8);
     let painter = ui.painter();
     painter.rect_filled(rect, rounding, theme.surface0);
-    painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0, theme.surface1));
+    painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0, theme.surface1), egui::StrokeKind::Middle);
 
     let has_header = title.is_some() || badge.is_some();
     let content_top = if has_header {
         let header_rect =
             egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + HEADER_H));
         let header_rounding = egui::Rounding {
-            nw: CARD_RADIUS,
-            ne: CARD_RADIUS,
-            sw: 0.0,
-            se: 0.0,
+            nw: (CARD_RADIUS) as u8,
+            ne: (CARD_RADIUS) as u8,
+            sw: 0,
+            se: 0,
         };
         painter.rect_filled(header_rect, header_rounding, theme.mantle);
 
@@ -117,10 +117,10 @@ pub fn progress_bar(
     );
     let radius = (height * 0.5).min(4.0);
     let painter = ui.painter();
-    painter.rect_filled(rect, egui::Rounding::same(radius), track);
+    painter.rect_filled(rect, egui::Rounding::same((radius) as u8), track);
     if frac > 0.0 {
         let mut fg = rect;
         fg.max.x = rect.min.x + rect.width() * frac;
-        painter.rect_filled(fg, egui::Rounding::same(radius), fill);
+        painter.rect_filled(fg, egui::Rounding::same((radius) as u8), fill);
     }
 }

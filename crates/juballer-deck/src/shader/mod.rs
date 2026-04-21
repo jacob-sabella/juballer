@@ -224,6 +224,7 @@ impl ShaderPipelineCache {
             label: Some("tile shader pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: ctx.target_view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -233,6 +234,7 @@ impl ShaderPipelineCache {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         pass.set_viewport(x, y, w, h, 0.0, 1.0);
@@ -328,13 +330,13 @@ fn compile_pipeline(
     let label = format!("tile shader {}", path.display());
 
     // Intercept validation errors so they don't crash the app. wgpu `push_error_scope`
-    // returns the first error inside the scope via `pop_error_scope`.
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    // returns a guard whose `.pop()` yields the first error inside the scope.
+    let guard = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&label),
         source: wgpu::ShaderSource::Wgsl(wgsl.into()),
     });
-    let err = pollster::block_on(device.pop_error_scope());
+    let err = pollster::block_on(guard.pop());
     if let Some(e) = err {
         return Err(e.to_string());
     }
@@ -354,11 +356,11 @@ fn compile_pipeline(
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tile shader pl"),
-        bind_group_layouts: &[&bgl],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bgl)],
+        immediate_size: 0,
     });
 
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let guard = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(&label),
         layout: Some(&pl),
@@ -381,10 +383,10 @@ fn compile_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     });
-    let err = pollster::block_on(device.pop_error_scope());
+    let err = pollster::block_on(guard.pop());
     if let Some(e) = err {
         return Err(e.to_string());
     }

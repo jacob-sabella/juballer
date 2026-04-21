@@ -237,8 +237,8 @@ fn render_node(ui: &mut egui::Ui, node: &ViewNode, cx: &RenderCx<'_>) {
             let rad = rounding.unwrap_or(0.0);
             egui::Frame::none()
                 .fill(fill)
-                .rounding(egui::Rounding::same(rad))
-                .inner_margin(egui::Margin::same(4.0))
+                .rounding(egui::Rounding::same((rad) as u8))
+                .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| render_node(ui, child, cx));
         }
         ViewNode::Progress {
@@ -433,7 +433,7 @@ fn render_plot(
     let painter = ui.painter_at(rect);
     painter.rect_filled(
         rect,
-        egui::Rounding::same(2.0),
+        egui::Rounding::same(2),
         egui::Color32::from_rgba_unmultiplied(0x1e, 0x1e, 0x2e, 128),
     );
     if values.len() >= 2 {

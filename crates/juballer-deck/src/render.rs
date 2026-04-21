@@ -276,7 +276,7 @@ fn paint_tile(
     shader_err: Option<&str>,
 ) {
     let rect = ui.max_rect();
-    let rounding = egui::Rounding::same(10.0);
+    let rounding = egui::Rounding::same(10);
     let tile_rect = rect.shrink(2.0);
     let is_bound = bound.is_some();
 
@@ -373,10 +373,10 @@ fn paint_tile(
     painter.rect_filled(
         hi,
         egui::Rounding {
-            nw: rounding.nw,
-            ne: rounding.ne,
-            sw: 0.0,
-            se: 0.0,
+            nw: (rounding.nw) as u8,
+            ne: (rounding.ne) as u8,
+            sw: 0,
+            se: 0,
         },
         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18),
     );
@@ -387,10 +387,10 @@ fn paint_tile(
     painter.rect_filled(
         lo,
         egui::Rounding {
-            nw: 0.0,
-            ne: 0.0,
-            sw: rounding.sw,
-            se: rounding.se,
+            nw: 0,
+            ne: 0,
+            sw: (rounding.sw) as u8,
+            se: (rounding.se) as u8,
         },
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 34),
     );
@@ -402,7 +402,7 @@ fn paint_tile(
             crate::action::ActionKind::Toggle => (state_color32.unwrap_or(theme.surface1), 1.5),
             crate::action::ActionKind::Action => (theme.surface1, 1.0),
         };
-        painter.rect_stroke(tile_rect, rounding, egui::Stroke::new(border_w, border_col));
+        painter.rect_stroke(tile_rect, rounding, egui::Stroke::new(border_w, border_col), egui::StrokeKind::Middle);
     } else {
         paint_dashed_rect(painter, tile_rect, rounding, theme.surface1, 4.0, 4.0, 1.0);
         // Faint centered dot to suggest "nothing here" without being loud.
@@ -435,12 +435,11 @@ fn paint_tile(
         let a = primary_accent;
         painter.rect_stroke(
             tile_rect.shrink(4.0),
-            egui::Rounding::same(8.0),
+            egui::Rounding::same(8),
             egui::Stroke::new(
                 1.0,
                 egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 70),
-            ),
-        );
+            ), egui::StrokeKind::Middle);
     }
 
     // 6. Press flash — accent-tinted fill + two expanding bloom rings.
@@ -464,12 +463,11 @@ fn paint_tile(
                 let ring_alpha = ((1.0 - progress) * base_alpha as f32) as u8;
                 painter.rect_stroke(
                     ring_rect,
-                    egui::Rounding::same(10.0 + ring_grow),
+                    egui::Rounding::same((10.0 + ring_grow) as u8),
                     egui::Stroke::new(
                         1.5,
                         egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), ring_alpha),
-                    ),
-                );
+                    ), egui::StrokeKind::Middle);
             }
         }
     }
@@ -571,7 +569,7 @@ fn paint_tile(
         );
         ui.painter().rect_filled(
             bar,
-            egui::Rounding::same(bar_h * 0.5),
+            egui::Rounding::same((bar_h * 0.5) as u8),
             egui::Color32::from_rgba_premultiplied(accent.0, accent.1, accent.2, accent.3),
         );
     }
@@ -585,7 +583,7 @@ fn paint_tile(
         );
         ui.painter().rect_filled(
             badge,
-            egui::Rounding::same(4.0),
+            egui::Rounding::same(4),
             egui::Color32::from_rgba_unmultiplied(220, 40, 40, 230),
         );
         let mut short = err.replace('\n', " ");
@@ -663,17 +661,17 @@ fn paint_vertical_gradient(
         let r = egui::Rect::from_min_max(egui::pos2(rect.min.x, y0), egui::pos2(rect.max.x, y1));
         let rd = if i == 0 {
             egui::Rounding {
-                nw: rounding.nw,
-                ne: rounding.ne,
-                sw: 0.0,
-                se: 0.0,
+                nw: (rounding.nw) as u8,
+                ne: (rounding.ne) as u8,
+                sw: 0,
+                se: 0,
             }
         } else if i == STRIPS - 1 {
             egui::Rounding {
-                nw: 0.0,
-                ne: 0.0,
-                sw: rounding.sw,
-                se: rounding.se,
+                nw: 0,
+                ne: 0,
+                sw: (rounding.sw) as u8,
+                se: (rounding.se) as u8,
             }
         } else {
             egui::Rounding::ZERO
@@ -690,7 +688,7 @@ fn paint_icon_halo(painter: &egui::Painter, rect: egui::Rect, accent: egui::Colo
         let rr = egui::Rect::from_center_size(center, egui::vec2(r * 2.0, r * 2.0));
         painter.rect_filled(
             rr,
-            egui::Rounding::same(r),
+            egui::Rounding::same((r) as u8),
             egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha),
         );
     }
@@ -736,7 +734,7 @@ fn paint_corner_ribbon(
     );
     painter.rect_filled(
         ribbon,
-        egui::Rounding::same(h * 0.5),
+        egui::Rounding::same((h * 0.5) as u8),
         egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 220),
     );
     painter.text(
@@ -759,18 +757,18 @@ fn paint_toggle_pill(painter: &egui::Painter, rect: egui::Rect, accent: egui::Co
     );
     painter.rect_filled(
         bar,
-        egui::Rounding::same(bar_h * 0.5),
+        egui::Rounding::same((bar_h * 0.5) as u8),
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60),
     );
-    painter.rect_filled(bar, egui::Rounding::same(bar_h * 0.5), accent);
+    painter.rect_filled(bar, egui::Rounding::same((bar_h * 0.5) as u8), accent);
     let hi = egui::Rect::from_min_max(bar.min, egui::pos2(bar.max.x, bar.min.y + bar_h * 0.45));
     painter.rect_filled(
         hi,
         egui::Rounding {
-            nw: bar_h * 0.5,
-            ne: bar_h * 0.5,
-            sw: 0.0,
-            se: 0.0,
+            nw: (bar_h * 0.5) as u8,
+            ne: (bar_h * 0.5) as u8,
+            sw: 0,
+            se: 0,
         },
         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 50),
     );
@@ -815,8 +813,8 @@ fn paint_dashed_rect(
         .nw
         .max(rounding.ne)
         .max(rounding.sw)
-        .max(rounding.se)
-        .max(2.0);
+        .max(rounding.se) as f32;
+    let r = r.max(2.0);
     let top_y = rect.min.y;
     let bot_y = rect.max.y;
     let left_x = rect.min.x;
