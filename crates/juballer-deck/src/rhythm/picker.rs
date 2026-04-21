@@ -2140,7 +2140,9 @@ fn draw_overlay(
                                     egui::Stroke::new(
                                         1.0,
                                         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80),
-                                    ), egui::StrokeKind::Middle);
+                                    ),
+                                    egui::StrokeKind::Middle,
+                                );
                                 text_right = art_rect.left() - 12.0;
                             }
                         }
@@ -2373,7 +2375,9 @@ fn draw_overlay(
                         egui::Stroke::new(
                             1.0,
                             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 45),
-                        ), egui::StrokeKind::Middle);
+                        ),
+                        egui::StrokeKind::Middle,
+                    );
                     super::textfx::text_outlined(
                         &painter,
                         anchor + egui::vec2(0.0, 0.0),
@@ -2699,7 +2703,9 @@ fn draw_filter_overlay(
                                 tile.accent.b(),
                                 90,
                             ),
-                        ), egui::StrokeKind::Middle);
+                        ),
+                        egui::StrokeKind::Middle,
+                    );
                     super::textfx::text_outlined(
                         &painter,
                         panel_rect.left_top() + egui::vec2(8.0, 6.0),

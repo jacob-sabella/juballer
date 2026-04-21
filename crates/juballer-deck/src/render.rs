@@ -402,7 +402,12 @@ fn paint_tile(
             crate::action::ActionKind::Toggle => (state_color32.unwrap_or(theme.surface1), 1.5),
             crate::action::ActionKind::Action => (theme.surface1, 1.0),
         };
-        painter.rect_stroke(tile_rect, rounding, egui::Stroke::new(border_w, border_col), egui::StrokeKind::Middle);
+        painter.rect_stroke(
+            tile_rect,
+            rounding,
+            egui::Stroke::new(border_w, border_col),
+            egui::StrokeKind::Middle,
+        );
     } else {
         paint_dashed_rect(painter, tile_rect, rounding, theme.surface1, 4.0, 4.0, 1.0);
         // Faint centered dot to suggest "nothing here" without being loud.
@@ -439,7 +444,9 @@ fn paint_tile(
             egui::Stroke::new(
                 1.0,
                 egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 70),
-            ), egui::StrokeKind::Middle);
+            ),
+            egui::StrokeKind::Middle,
+        );
     }
 
     // 6. Press flash — accent-tinted fill + two expanding bloom rings.
@@ -467,7 +474,9 @@ fn paint_tile(
                     egui::Stroke::new(
                         1.5,
                         egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), ring_alpha),
-                    ), egui::StrokeKind::Middle);
+                    ),
+                    egui::StrokeKind::Middle,
+                );
             }
         }
     }

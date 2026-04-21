@@ -66,7 +66,12 @@ impl Widget for ActionMiniWidget {
             );
         }
         painter.rect_filled(tile, rounding, theme.surface0);
-        painter.rect_stroke(tile, rounding, egui::Stroke::new(1.0, theme.surface1), egui::StrokeKind::Middle);
+        painter.rect_stroke(
+            tile,
+            rounding,
+            egui::Stroke::new(1.0, theme.surface1),
+            egui::StrokeKind::Middle,
+        );
 
         if resp.hovered() {
             let a = theme.accent;
@@ -76,7 +81,9 @@ impl Widget for ActionMiniWidget {
                 egui::Stroke::new(
                     1.5,
                     egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 180),
-                ), egui::StrokeKind::Middle);
+                ),
+                egui::StrokeKind::Middle,
+            );
         }
 
         // Press flash.

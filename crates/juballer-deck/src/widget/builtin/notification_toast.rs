@@ -190,7 +190,11 @@ impl Widget for NotificationToastWidget {
             theme.surface1.b(),
             alpha,
         );
-        painter.rect_filled(toast_rect, egui::Rounding::same((CARD_RADIUS) as u8), bg_color);
+        painter.rect_filled(
+            toast_rect,
+            egui::Rounding::same((CARD_RADIUS) as u8),
+            bg_color,
+        );
         painter.rect_stroke(
             toast_rect,
             egui::Rounding::same((CARD_RADIUS) as u8),

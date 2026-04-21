@@ -582,8 +582,7 @@ fn render_one_frame(
 
     // 3. Composite to swapchain.
     let frame_tex = match gpu.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f)
-        | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
         // Surface acquisition failure (resize race, swapchain lost,
         // …): drop this frame but honour whatever outcome the mode
         // already produced so a SwitchTo / Exit doesn't get stuck.

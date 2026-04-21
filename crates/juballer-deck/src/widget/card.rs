@@ -38,7 +38,12 @@ pub fn draw_card(
     let rounding = egui::Rounding::same((CARD_RADIUS) as u8);
     let painter = ui.painter();
     painter.rect_filled(rect, rounding, theme.surface0);
-    painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0, theme.surface1), egui::StrokeKind::Middle);
+    painter.rect_stroke(
+        rect,
+        rounding,
+        egui::Stroke::new(1.0, theme.surface1),
+        egui::StrokeKind::Middle,
+    );
 
     let has_header = title.is_some() || badge.is_some();
     let content_top = if has_header {
