@@ -50,7 +50,7 @@ impl Widget for ActionMiniWidget {
         let theme = cx.theme;
         let rect = ui.max_rect();
         let tile = rect.shrink(3.0);
-        let rounding = egui::Rounding::same(CARD_RADIUS);
+        let rounding = egui::CornerRadius::same((CARD_RADIUS) as u8);
 
         let resp = ui.allocate_rect(rect, egui::Sense::click());
         let painter = ui.painter();
@@ -66,7 +66,12 @@ impl Widget for ActionMiniWidget {
             );
         }
         painter.rect_filled(tile, rounding, theme.surface0);
-        painter.rect_stroke(tile, rounding, egui::Stroke::new(1.0, theme.surface1));
+        painter.rect_stroke(
+            tile,
+            rounding,
+            egui::Stroke::new(1.0, theme.surface1),
+            egui::StrokeKind::Middle,
+        );
 
         if resp.hovered() {
             let a = theme.accent;
@@ -77,6 +82,7 @@ impl Widget for ActionMiniWidget {
                     1.5,
                     egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 180),
                 ),
+                egui::StrokeKind::Middle,
             );
         }
 

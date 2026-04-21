@@ -518,6 +518,7 @@ fn render_one_frame(
             label: Some("clear offscreen"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &gpu.offscreen.view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -532,6 +533,7 @@ fn render_one_frame(
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
     }
 
@@ -580,11 +582,11 @@ fn render_one_frame(
 
     // 3. Composite to swapchain.
     let frame_tex = match gpu.surface.get_current_texture() {
-        Ok(f) => f,
+        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
         // Surface acquisition failure (resize race, swapchain lost,
         // …): drop this frame but honour whatever outcome the mode
         // already produced so a SwitchTo / Exit doesn't get stuck.
-        Err(_) => return outcome,
+        _ => return outcome,
     };
     let dst = frame_tex
         .texture
@@ -619,6 +621,7 @@ fn draw_borders(
         label: Some("borders"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &gpu.offscreen.view,
+            depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
@@ -628,6 +631,7 @@ fn draw_borders(
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,
+        multiview_mask: None,
     });
     pass.set_pipeline(gpu.fill.pipeline());
     pass.set_bind_group(0, gpu.fill.bind(), &[]);
@@ -676,6 +680,7 @@ fn draw_debug_corner_markers(
         label: Some("debug markers"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &gpu.offscreen.view,
+            depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
@@ -685,6 +690,7 @@ fn draw_debug_corner_markers(
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,
+        multiview_mask: None,
     });
     pass.set_pipeline(gpu.fill.pipeline());
     pass.set_bind_group(0, gpu.fill.bind(), &[]);
@@ -719,6 +725,7 @@ fn draw_calibration_overlay(
         label: Some("calibration overlay"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &gpu.offscreen.view,
+            depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
@@ -728,6 +735,7 @@ fn draw_calibration_overlay(
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,
+        multiview_mask: None,
     });
     pass.set_pipeline(gpu.fill.pipeline());
     pass.set_bind_group(0, gpu.fill.bind(), &[]);
@@ -770,6 +778,7 @@ fn draw_top_region_overlay(enc: &mut wgpu::CommandEncoder, gpu: &Gpu, rect: crat
         label: Some("top-region overlay"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &gpu.offscreen.view,
+            depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
@@ -779,6 +788,7 @@ fn draw_top_region_overlay(enc: &mut wgpu::CommandEncoder, gpu: &Gpu, rect: crat
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,
+        multiview_mask: None,
     });
     pass.set_pipeline(gpu.fill.pipeline());
     pass.set_bind_group(0, gpu.fill.bind(), &[]);

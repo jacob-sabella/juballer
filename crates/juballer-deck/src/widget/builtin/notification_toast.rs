@@ -190,11 +190,16 @@ impl Widget for NotificationToastWidget {
             theme.surface1.b(),
             alpha,
         );
-        painter.rect_filled(toast_rect, egui::Rounding::same(CARD_RADIUS), bg_color);
+        painter.rect_filled(
+            toast_rect,
+            egui::CornerRadius::same((CARD_RADIUS) as u8),
+            bg_color,
+        );
         painter.rect_stroke(
             toast_rect,
-            egui::Rounding::same(CARD_RADIUS),
+            egui::CornerRadius::same((CARD_RADIUS) as u8),
             egui::Stroke::new(1.0, border_color),
+            egui::StrokeKind::Middle,
         );
 
         // Accent left-edge bar (4px wide), fully opaque color.
@@ -204,7 +209,7 @@ impl Widget for NotificationToastWidget {
         );
         painter.rect_filled(
             bar_rect,
-            egui::Rounding::same(2.0),
+            egui::CornerRadius::same(2),
             egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha),
         );
 

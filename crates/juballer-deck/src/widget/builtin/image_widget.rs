@@ -61,7 +61,7 @@ impl Widget for ImageWidget {
                     ui.add(
                         egui::Image::new(egui::load::SizedTexture::from_handle(&tex))
                             .fit_to_exact_size(draw_size)
-                            .rounding(egui::Rounding::same(CARD_RADIUS * 0.5)),
+                            .corner_radius(egui::CornerRadius::same((CARD_RADIUS * 0.5) as u8)),
                     );
                 }
                 Err(e) => {

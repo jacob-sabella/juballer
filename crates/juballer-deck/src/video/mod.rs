@@ -64,8 +64,8 @@ impl BlitPipeline {
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("video blit pl"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("video blit pipeline"),
@@ -89,7 +89,7 @@ impl BlitPipeline {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -194,14 +194,14 @@ impl VideoSource {
     fn upload_frame(&mut self, queue: &wgpu::Queue, frame: &VideoFrame) {
         if let Some(tex) = self.texture.as_ref() {
             queue.write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: tex,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 &frame.data,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(frame.width * 4),
                     rows_per_image: Some(frame.height),
@@ -326,6 +326,7 @@ impl VideoRegistry {
             label: Some("video blit pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: ctx.target_view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -335,6 +336,7 @@ impl VideoRegistry {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         pass.set_viewport(x, y, w, h, 0.0, 1.0);

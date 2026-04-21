@@ -136,9 +136,12 @@ impl EguiOverlay {
             self.renderer = Some(Renderer::new(
                 frame.device(),
                 frame.format(),
-                None,  // no depth
-                1,     // msaa samples
-                false, // dither
+                egui_wgpu::RendererOptions {
+                    msaa_samples: 1,
+                    depth_stencil_format: None,
+                    dithering: false,
+                    predictable_texture_filtering: false,
+                },
             ));
         }
     }
@@ -162,6 +165,8 @@ impl EguiOverlay {
         // `ctx.run` takes `FnMut`; wrap the `FnOnce` builder in an Option and `take()` it
         // so it runs exactly once while still satisfying the `FnMut` bound.
         let mut builder_opt = Some(builder);
+        #[allow(deprecated)] // egui 0.34 pushes run_ui, but that callback gets &mut Ui; our
+        // builder composes Areas against a &Context, which only ctx.run provides.
         let full_output = self.ctx.run(raw_input, |ctx| {
             if let Some(b) = builder_opt.take() {
                 let mut rc = RegionCtx {
@@ -271,7 +276,7 @@ mod tests {
     fn bundled_fonts_cover_key_codepoints() {
         let overlay = EguiOverlay::new();
         // Drive the context once so fonts get loaded (set_fonts is lazy).
-        let _ = overlay.ctx.run(egui::RawInput::default(), |_| {});
+        let _ = overlay.ctx.run_ui(egui::RawInput::default(), |_| {});
 
         let font_id = egui::FontId::proportional(16.0);
         let expected_covered: &[(char, &str)] = &[
@@ -291,7 +296,7 @@ mod tests {
         ];
 
         let mut missing: Vec<(char, &str)> = Vec::new();
-        overlay.ctx.fonts(|fonts| {
+        overlay.ctx.fonts_mut(|fonts| {
             for &(c, name) in expected_covered {
                 if !fonts.has_glyph(&font_id, c) {
                     missing.push((c, name));
@@ -312,7 +317,7 @@ mod tests {
         // want to know — likely means `has_glyph` semantics changed.
         let pua_covered = overlay
             .ctx
-            .fonts(|fonts| fonts.has_glyph(&font_id, '\u{E000}'));
+            .fonts_mut(|fonts| fonts.has_glyph(&font_id, '\u{E000}'));
         assert!(
             !pua_covered,
             "Private Use Area U+E000 was reported as covered — test logic is unsound (false positives possible)"

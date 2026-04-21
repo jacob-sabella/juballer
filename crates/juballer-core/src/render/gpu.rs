@@ -41,7 +41,7 @@ impl Gpu {
         };
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance
             .create_surface(window.clone())
@@ -54,18 +54,17 @@ impl Gpu {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or_else(|| Error::GpuInit("no compatible adapter".into()))?;
+            .map_err(|e| Error::GpuInit(format!("no compatible adapter: {e}")))?;
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("juballer-core device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("juballer-core device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|e| Error::GpuInit(format!("request_device: {e}")))?;
 

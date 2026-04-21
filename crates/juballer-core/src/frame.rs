@@ -93,6 +93,7 @@ impl<'a> Frame<'a> {
             label: Some("frame overlay pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: self.offscreen_view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -102,6 +103,7 @@ impl<'a> Frame<'a> {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         })
     }
 
@@ -237,6 +239,7 @@ impl<'a> RegionDraw<'a> {
             label: Some("region fill"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: self.gpu.view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -246,6 +249,7 @@ impl<'a> RegionDraw<'a> {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_scissor_rect(r_x, r_y, r_w, r_h);
         pass.set_viewport(r_x as f32, r_y as f32, r_w as f32, r_h as f32, 0.0, 1.0);
@@ -265,6 +269,7 @@ impl<'a> RegionDraw<'a> {
             label: Some("region render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: self.gpu.view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -274,6 +279,7 @@ impl<'a> RegionDraw<'a> {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_scissor_rect(r_x, r_y, r_w, r_h);
         pass.set_viewport(r_x as f32, r_y as f32, r_w as f32, r_h as f32, 0.0, 1.0);

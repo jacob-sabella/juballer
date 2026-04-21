@@ -58,9 +58,9 @@ fn run_loop(keymap: Keymap, ring: Arc<EventRing>) {
             0,
             0,
             0,
-            HWND_MESSAGE,
+            Some(HWND_MESSAGE),
             None,
-            h_instance,
+            Some(h_instance),
             None,
         )
         .unwrap_or_default();
@@ -74,7 +74,7 @@ fn run_loop(keymap: Keymap, ring: Arc<EventRing>) {
         let _ = RegisterRawInputDevices(&[rid], std::mem::size_of::<RAWINPUTDEVICE>() as u32);
 
         let mut msg = MSG::default();
-        while GetMessageW(&mut msg, HWND::default(), 0, 0).into() {
+        while GetMessageW(&mut msg, None, 0, 0).into() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
