@@ -54,7 +54,7 @@ interprocess.workspace = true
 tokio-util.workspace = true
 futures-util = { version = "0.3", features = ["sink"] }
 tempfile = "3"
-rand = "0.9"
+rand = "0.10"
 # Rhythm mode audio. Default features would pull in symphonia for mp3/aac/etc. which
 # adds ~40 crates; Phase 1 only supports ogg/vorbis sample charts so we trim the
 # transitive graph by picking features explicitly.
