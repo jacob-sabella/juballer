@@ -18,9 +18,24 @@ repository = "https://github.com/jacob-sabella/juballer"
 
 [workspace.dependencies]
 winit = "0.30"
-wgpu = "29"
+# Drop the `gles` backend: wgpu-hal 29's GLES-on-Windows path (wgl)
+# fails to build against current windows-core
+# (windows_core::Error does not impl core::error::Error). We already
+# force Vulkan on Linux (see juballer-core/src/render/gpu.rs), so
+# dropping GLES loses nothing on our supported platforms.
+wgpu = { version = "29", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "dx12",
+    "metal",
+    "vulkan",
+    "wgsl",
+    "webgpu",
+] }
 egui = "0.34"
-egui-wgpu = "0.34"
+egui-wgpu = { version = "0.34", default-features = false, features = [
+    "macos-window-resize-jitter-fix",
+] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 thiserror = "1.0"
