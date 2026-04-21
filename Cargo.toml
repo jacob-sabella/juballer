@@ -18,15 +18,17 @@ repository = "https://github.com/jacob-sabella/juballer"
 
 [workspace.dependencies]
 winit = "0.30"
-# Drop the `gles` backend: wgpu-hal 29's GLES-on-Windows path (wgl)
-# fails to build against current windows-core
-# (windows_core::Error does not impl core::error::Error). We already
-# force Vulkan on Linux (see juballer-core/src/render/gpu.rs), so
-# dropping GLES loses nothing on our supported platforms.
+# Trim wgpu backends. `gles` is dropped because wgpu-hal 29's GLES-
+# on-Windows path (wgl) fails to build against current windows-core.
+# `dx12` is dropped because wgpu-hal 29 pulls `gpu-allocator` 0.28,
+# which depends on `windows = ">=0.53, <=0.62"`; when the workspace
+# also has a crate pinning `windows = "0.61"` (enigo), cargo picks
+# 0.61 for gpu-allocator while wgpu-hal itself pins `windows = "0.62"`
+# — the two Direct3D12 types then fail to unify. We already force
+# Vulkan on Linux and Windows has good Vulkan driver support.
 wgpu = { version = "29", default-features = false, features = [
     "std",
     "parking_lot",
-    "dx12",
     "metal",
     "vulkan",
     "wgsl",
@@ -47,7 +49,7 @@ log = "0.4"
 env_logger = "0.11"
 raw-window-handle = "0.6"
 evdev = "0.13"
-windows = { version = "0.58", features = ["Win32_UI_Input", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_UI_Input", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 dhat = "0.3"
 criterion = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -58,7 +60,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = "1"
 arboard = "3"
-enigo = "0.5"
+enigo = "0.6"
 axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
