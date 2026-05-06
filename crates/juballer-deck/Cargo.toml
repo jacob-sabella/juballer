@@ -58,7 +58,7 @@ rand = "0.10"
 # Rhythm mode audio. Default features would pull in symphonia for mp3/aac/etc. which
 # adds ~40 crates; Phase 1 only supports ogg/vorbis sample charts so we trim the
 # transitive graph by picking features explicitly.
-rodio = { version = "0.19", default-features = false, features = ["vorbis", "wav"] }
+rodio = { version = "0.22", default-features = false, features = ["vorbis", "wav"] }
 # Real-audio FFT for shader backgrounds. `realfft` wraps rustfft with a
 # half-spectrum output optimised for real input (half the buffer, same math).
 realfft = "3"
