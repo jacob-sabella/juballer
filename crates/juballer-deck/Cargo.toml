@@ -70,7 +70,7 @@ jpeg-decoder = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.29"
 
 [[bin]]
 name = "juballer-deck"
