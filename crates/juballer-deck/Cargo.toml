@@ -28,7 +28,7 @@ egui_extras = { version = "0.34", features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64.workspace = true
 
-sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 serde.workspace = true
