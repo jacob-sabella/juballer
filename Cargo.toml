@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 # Floor set by the dependency tree, not by our own code: sysinfo 0.39 needs
 # 1.95, egui 0.34 needs 1.92, rodio 0.22 needs 1.87. Keep this honest —
