@@ -11,7 +11,10 @@ members = [
 [workspace.package]
 version = "0.0.4"
 edition = "2021"
-rust-version = "1.80"
+# Floor set by the dependency tree, not by our own code: sysinfo 0.39 needs
+# 1.95, egui 0.34 needs 1.92, rodio 0.22 needs 1.87. Keep this honest —
+# the previous 1.80 hadn't been buildable for several egui bumps.
+rust-version = "1.95"
 license = "MIT"
 authors = ["Jacob Sabella <jacobsabella@outlook.com>"]
 repository = "https://github.com/jacob-sabella/juballer"
@@ -66,7 +69,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = "1"
 arboard = "3"
 enigo = "0.6"
-axum = "0.7"
+axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 interprocess = { version = "2", features = ["tokio"] }

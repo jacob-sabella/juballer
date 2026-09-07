@@ -2,7 +2,7 @@
 //!
 //! Each grade (Perfect/Great/Good/Poor/Miss) maps to a small ~30–80ms OGG
 //! sample under `assets/sample/sfx/`. [`SfxBank`] owns a dedicated rodio
-//! `OutputStream` + `OutputStreamHandle` — the SFX path is deliberately
+//! device sink + `Mixer` handle — the SFX path is deliberately
 //! **separate** from the song audio sink in [`super::audio`], so a burst of
 //! hit sounds can never preempt or stall the music.
 //!
@@ -11,14 +11,16 @@
 //! playing without audio feedback. The `muted` flag is wired to the top-
 //! level `--mute-sfx` CLI flag so devs can silence it entirely.
 //!
-//! Each [`play`](SfxBank::play) call spawns a fresh one-shot `Sink` on the
-//! shared stream handle and appends a freshly-decoded source. Rodio frees
-//! the sink once the source finishes, so bank state stays bounded.
+//! Each [`play`](SfxBank::play) call spawns a fresh one-shot `Player` on the
+//! shared mixer and appends a freshly-decoded source. Rodio frees the player
+//! once the source finishes, so bank state stays bounded.
 
 use super::judge::Grade;
 use crate::{Error, Result};
+use rodio::mixer::Mixer;
 use rodio::source::Source;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::stream::{DeviceSinkBuilder, MixerDeviceSink};
+use rodio::{Decoder, Player};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -71,19 +73,19 @@ pub(crate) fn grade_volume_factor(grade: Grade) -> f32 {
     }
 }
 
-/// Audio output for hit sounds. Holds its own `OutputStream` distinct from
+/// Audio output for hit sounds. Holds its own device sink distinct from
 /// the song's — see module docs.
 pub struct SfxBank {
-    // OutputStream must stay alive for the handle to produce audio; we
+    // The device sink must stay alive for the mixer to produce audio; we
     // never touch it directly after construction.
-    _stream: Option<OutputStream>,
-    handle: Option<OutputStreamHandle>,
+    _stream: Option<MixerDeviceSink>,
+    mixer: Option<Mixer>,
     samples: Vec<Sample>,
     muted: bool,
     master_volume: f32,
-    /// Bounded queue of in-flight sinks. Capped at [`MAX_ACTIVE_SINKS`];
+    /// Bounded queue of in-flight players. Capped at [`MAX_ACTIVE_SINKS`];
     /// oldest is dropped (and thus stopped) when the cap is hit.
-    active: VecDeque<Sink>,
+    active: VecDeque<Player>,
     /// Per-grade timestamp of the last successful `play`. Used by
     /// [`cooldown_allows`](Self::cooldown_allows) to suppress duplicate sounds
     /// from chords where multiple notes hit the same grade in one frame.
@@ -100,7 +102,7 @@ impl SfxBank {
     pub fn new_empty() -> Self {
         Self {
             _stream: None,
-            handle: None,
+            mixer: None,
             samples: GRADES
                 .iter()
                 .map(|g| Sample {
@@ -129,10 +131,10 @@ impl SfxBank {
             })
             .collect();
 
-        match OutputStream::try_default() {
-            Ok((stream, handle)) => Self {
+        match DeviceSinkBuilder::open_default_sink() {
+            Ok(stream) => Self {
+                mixer: Some(stream.mixer().clone()),
                 _stream: Some(stream),
-                handle: Some(handle),
                 samples,
                 muted: false,
                 master_volume: 0.35,
@@ -147,7 +149,7 @@ impl SfxBank {
                 );
                 Self {
                     _stream: None,
-                    handle: None,
+                    mixer: None,
                     samples,
                     muted: false,
                     master_volume: 0.35,
@@ -184,11 +186,11 @@ impl SfxBank {
         self.master_volume = v.clamp(0.0, 1.0);
     }
 
-    /// True if this bank has a live output handle AND at least one loaded
+    /// True if this bank has a live mixer handle AND at least one loaded
     /// sample. Mainly for tests — callers should just call [`play`] and let
     /// the bank decide what to do.
     pub fn is_ready(&self) -> bool {
-        self.handle.is_some() && self.samples.iter().any(|s| s.bytes.is_some())
+        self.mixer.is_some() && self.samples.iter().any(|s| s.bytes.is_some())
     }
 
     /// Returns `true` if no sound for `grade` has been played within the
@@ -218,7 +220,7 @@ impl SfxBank {
         if !self.cooldown_allows(grade) {
             return;
         }
-        let Some(handle) = self.handle.as_ref() else {
+        let Some(mixer) = self.mixer.clone() else {
             self.warn_once("no audio output handle");
             return;
         };
@@ -232,7 +234,7 @@ impl SfxBank {
             return;
         };
 
-        // GC finished sinks before adding a new one so the cap reflects live
+        // GC finished players before adding a new one so the cap reflects live
         // voices only, not voices that already drained their source.
         self.active.retain(|s| !s.empty());
 
@@ -246,13 +248,7 @@ impl SfxBank {
                 return;
             }
         };
-        let sink = match Sink::try_new(handle) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::debug!(target: "juballer::rhythm::sfx", "sink create failed: {e}");
-                return;
-            }
-        };
+        let sink = Player::connect_new(&mixer);
         let vol = self.master_volume * grade_volume_factor(grade);
         sink.set_volume(vol);
         // Small guard on total duration: force-stop after 500ms so an
@@ -269,10 +265,10 @@ impl SfxBank {
         self.active.len()
     }
 
-    /// Push a new `Sink` into the active queue, dropping the oldest if the
-    /// queue is at capacity. Dropping a rodio `Sink` stops its currently-
+    /// Push a new `Player` into the active queue, dropping the oldest if the
+    /// queue is at capacity. Dropping a rodio `Player` stops its currently-
     /// playing source — exactly the voice-steal we want.
-    fn enqueue_sink(&mut self, sink: Sink) {
+    fn enqueue_sink(&mut self, sink: Player) {
         while self.active.len() >= MAX_ACTIVE_SINKS {
             self.active.pop_front();
         }
@@ -281,9 +277,9 @@ impl SfxBank {
 
     #[cfg(test)]
     fn push_dummy_sink_for_test(&mut self) {
-        // Sink::new_idle doesn't need an output handle — perfect for
+        // Player::new doesn't need an output device — perfect for
         // headless tests exercising queue bookkeeping only.
-        let (sink, _queue) = Sink::new_idle();
+        let (sink, _queue) = Player::new();
         self.enqueue_sink(sink);
     }
 

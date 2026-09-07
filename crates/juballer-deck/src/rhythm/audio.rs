@@ -1,8 +1,8 @@
-//! Audio playback wrapper over rodio 0.19.
+//! Audio playback wrapper over rodio 0.22.
 //!
-//! Ownership model: [`Audio`] owns the `OutputStream` (must live as long as the
-//! sink) and an `Arc<Sink>` so the game loop can query the playing offset without
-//! cloning the stream. `position_ms` is the master clock for the rhythm game;
+//! Ownership model: [`Audio`] owns the `MixerDeviceSink` (the device stream must
+//! live as long as the player) and an `Arc<Player>` so the game loop can query the
+//! playing offset without cloning the stream. `position_ms` is the master clock for the rhythm game;
 //! every note-scheduling decision and every input-judgment calculation is
 //! expressed relative to it.
 //!
@@ -16,7 +16,8 @@
 
 use crate::rhythm::spectrum::{SampleTap, SharedSpectrum};
 use crate::{Error, Result};
-use rodio::{Decoder, OutputStream, Sink, Source};
+use rodio::stream::{DeviceSinkBuilder, MixerDeviceSink};
+use rodio::{Decoder, Player, Source};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -25,9 +26,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub struct Audio {
-    // OutputStream must live as long as the sink but isn't otherwise accessed.
-    _stream: OutputStream,
-    sink: Arc<Sink>,
+    // The device sink must live as long as the player but isn't otherwise accessed.
+    _stream: MixerDeviceSink,
+    sink: Arc<Player>,
     /// Monotonic reference instant from which `position_ms` is derived. Shifted
     /// **forward** by `start_delay_ms` for a delayed start, so
     /// `Instant::now() < start_instant` yields a negative music-time.
@@ -67,7 +68,7 @@ impl Audio {
         start_delay_ms: u32,
         spectrum: Option<SharedSpectrum>,
     ) -> Result<Self> {
-        let (stream, handle) = OutputStream::try_default()
+        let stream = DeviceSinkBuilder::open_default_sink()
             .map_err(|e| Error::Config(format!("audio: no output device: {e}")))?;
         let file = File::open(path)
             .map_err(|e| Error::Config(format!("audio: cannot open {}: {e}", path.display())))?;
@@ -76,8 +77,7 @@ impl Audio {
 
         let duration_ms = decoder.total_duration().map(|d| d.as_secs_f64() * 1000.0);
 
-        let sink = Sink::try_new(&handle)
-            .map_err(|e| Error::Config(format!("audio: sink create: {e}")))?;
+        let sink = Player::connect_new(stream.mixer());
         match spectrum {
             Some(shared) => sink.append(SampleTap::new(decoder, shared)),
             None => sink.append(decoder),
@@ -105,7 +105,7 @@ impl Audio {
     /// Once `now >= start_instant`, unpauses the sink if we haven't already
     /// and falls through to the rodio-backed position.
     ///
-    /// Uses `Sink::get_pos` (rodio 0.19+) with `user_offset_ms` applied.
+    /// Uses `Player::get_pos` with `user_offset_ms` applied.
     /// If the sink hasn't started producing yet (cold buffers or we're still
     /// in the delay window), falls back to wall-clock math relative to
     /// `start_instant`.
@@ -163,7 +163,7 @@ impl Audio {
 /// Pure arithmetic helper: milliseconds between `start_instant` and `now`,
 /// expressed as a signed f64. Negative when `now < start_instant`. Extracted
 /// so unit tests can exercise the clock math without needing a real rodio
-/// OutputStream (rodio fails on headless CI).
+/// device sink (rodio fails on headless CI).
 pub(crate) fn wall_position_ms(start_instant: Instant, now: Instant) -> f64 {
     if now >= start_instant {
         now.duration_since(start_instant).as_secs_f64() * 1000.0

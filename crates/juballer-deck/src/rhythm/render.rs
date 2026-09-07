@@ -295,7 +295,7 @@ pub fn draw_hit_rings(frame: &mut Frame, overlay: &mut EguiOverlay, state: &Game
                         center,
                         radius,
                         egui::Stroke::new(
-                            2.0,
+                            2.0_f32,
                             egui::Color32::from_rgba_unmultiplied(94, 232, 255, alpha),
                         ),
                     );
@@ -884,7 +884,7 @@ pub fn draw_hud_with_narration(
                 painter.rect_stroke(
                     life_rect,
                     egui::CornerRadius::same(3),
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(180)), egui::StrokeKind::Middle);
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_gray(180)), egui::StrokeKind::Middle);
 
                 // Jacket tile (top-right) — 120×120 when present. Painted
                 // before the BPM/time/judged block so the text overlays
@@ -1146,7 +1146,7 @@ pub fn draw_hud_with_narration(
                             painter.rect_stroke(
                                 er,
                                 egui::CornerRadius::same(6),
-                                egui::Stroke::new(1.5, fg), egui::StrokeKind::Middle);
+                                egui::Stroke::new(1.5_f32, fg), egui::StrokeKind::Middle);
                             super::textfx::text_outlined(
                                 &painter,
                                 er.center() + egui::vec2(0.0, -10.0),

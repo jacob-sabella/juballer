@@ -102,21 +102,21 @@ impl EditorServer {
             .route("/", get(serve_index))
             .route("/api/v1/state", get(api_state))
             .route("/api/v1/profiles", get(api_profiles))
-            .route("/api/v1/profiles/:name", get(api_profile))
+            .route("/api/v1/profiles/{name}", get(api_profile))
             .route(
-                "/api/v1/profiles/:profile/pages/:page",
+                "/api/v1/profiles/{profile}/pages/{page}",
                 get(api_get_page).post(api_write_page),
             )
             .route(
-                "/api/v1/profiles/:profile/activate",
+                "/api/v1/profiles/{profile}/activate",
                 post(api_activate_profile),
             )
             .route("/api/v1/actions", get(api_actions))
-            .route("/api/v1/actions/:name/schema", get(api_action_schema))
+            .route("/api/v1/actions/{name}/schema", get(api_action_schema))
             .route("/api/v1/widgets", get(api_widgets))
-            .route("/api/v1/widgets/:name/schema", get(api_widget_schema))
+            .route("/api/v1/widgets/{name}/schema", get(api_widget_schema))
             .route("/api/v1/plugins", get(api_plugins))
-            .route("/api/v1/plugins/:name/restart", post(api_restart_plugin))
+            .route("/api/v1/plugins/{name}/restart", post(api_restart_plugin))
             .route("/ws", get(ws_handler))
             .with_state(state)
     }
@@ -476,7 +476,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<EditorState>) {
             match bus_rx.recv().await {
                 Ok(ev) => {
                     if let Ok(s) = serde_json::to_string(&ev) {
-                        if sender.send(WsMessage::Text(s)).await.is_err() {
+                        if sender.send(WsMessage::Text(s.into())).await.is_err() {
                             break;
                         }
                     }

@@ -41,7 +41,9 @@ use crate::{Error, Result};
 use juballer_core::input::Event;
 use juballer_core::{App, Color, Frame, PresentMode};
 use juballer_egui::EguiOverlay;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::mixer::Mixer;
+use rodio::stream::DeviceSinkBuilder;
+use rodio::{Decoder, Player, Source};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -477,8 +479,9 @@ pub fn press_cell(
     }
 }
 
-/// Audio snippet looped while a cell is focused in the picker. Owns its own
-/// `OutputStream` + `Sink`, deliberately separate from the rhythm-mode
+/// Audio snippet looped while a cell is focused in the picker. Plays onto the
+/// picker's own device sink via a per-preview `Player`, deliberately separate
+/// from the rhythm-mode
 /// `Audio` so there's zero chance of the preview bleeding into gameplay
 /// playback. `stop()` (or `Drop`) halts the sink; building a fresh
 /// `PreviewPlayer` is how we "switch" previews — spin down the old one,
@@ -493,23 +496,23 @@ pub fn press_cell(
 /// flips Loading → Playing the moment the worker delivers a buffer.
 pub struct PreviewPlayer {
     state: PreviewState,
-    handle: OutputStreamHandle,
+    mixer: Mixer,
     spectrum: Option<super::spectrum::SharedSpectrum>,
 }
 
 enum PreviewState {
     Loading(std::sync::mpsc::Receiver<std::io::Result<PreviewBuf>>),
-    Playing(Sink),
+    Playing(Player),
 }
 
 /// What the worker thread sends back: pre-decoded sample buffers + the
 /// stream's native rate/channels so the main thread can wrap them in a
 /// `SamplesBuffer` without re-querying the decoder.
 struct PreviewBuf {
-    first: Vec<i16>,
-    looping: Vec<i16>,
-    sample_rate: u32,
-    channels: u16,
+    first: Vec<rodio::Sample>,
+    looping: Vec<rodio::Sample>,
+    sample_rate: rodio::SampleRate,
+    channels: rodio::ChannelCount,
 }
 
 impl PreviewPlayer {
@@ -520,14 +523,14 @@ impl PreviewPlayer {
     /// delivers the buffer. Caller polls [`Self::poll`] each frame to flip
     /// Loading → Playing.
     ///
-    /// `handle` is the long-lived stream handle owned by the picker —
-    /// keeping one [`OutputStream`] alive across the whole picker run
+    /// `mixer` is the long-lived mixer handle owned by the picker —
+    /// keeping one device sink alive across the whole picker run
     /// avoids the ~10-30 ms cold-open cost on every chart switch.
     pub fn start(
         audio_path: &Path,
         preview: Option<Preview>,
         spectrum: Option<super::spectrum::SharedSpectrum>,
-        handle: OutputStreamHandle,
+        mixer: Mixer,
     ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let path = audio_path.to_path_buf();
@@ -536,7 +539,7 @@ impl PreviewPlayer {
         });
         Self {
             state: PreviewState::Loading(rx),
-            handle,
+            mixer,
             spectrum,
         }
     }
@@ -559,14 +562,7 @@ impl PreviewPlayer {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
             },
         };
-        let sink = match Sink::try_new(&self.handle) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(target: "juballer::rhythm::picker",
-                    "preview sink create failed: {e}");
-                return;
-            }
-        };
+        let sink = Player::connect_new(&self.mixer);
         sink.set_volume(PREVIEW_VOLUME);
         let first_buf = SamplesBuffer::new(buf.channels, buf.sample_rate, buf.first);
         let loop_buf =
@@ -620,8 +616,9 @@ fn decode_preview(audio_path: &Path, preview: Option<Preview>) -> std::io::Resul
     let sample_rate = decoder.sample_rate();
     let channels = decoder.channels();
     let _ = decoder.try_seek(start); // O(1) on vorbis
-    let want_samples = (dur.as_secs_f64() * sample_rate as f64 * channels as f64) as usize;
-    let mut samples: Vec<i16> = Vec::with_capacity(want_samples);
+    let want_samples =
+        (dur.as_secs_f64() * sample_rate.get() as f64 * channels.get() as f64) as usize;
+    let mut samples: Vec<rodio::Sample> = Vec::with_capacity(want_samples);
     for s in decoder.by_ref().take(want_samples) {
         samples.push(s);
     }
@@ -634,24 +631,26 @@ fn decode_preview(audio_path: &Path, preview: Option<Preview>) -> std::io::Resul
     // Linear fade envelope sample counts (× channels). First iteration
     // is fade-out only (instant start when user picks). Loop iterations
     // get both fades for a soft seam.
-    let fade_in_n = ((PREVIEW_FADE_IN.as_secs_f64() * sample_rate as f64 * channels as f64)
-        as usize)
+    let fade_in_n = ((PREVIEW_FADE_IN.as_secs_f64()
+        * sample_rate.get() as f64
+        * channels.get() as f64) as usize)
         .min(samples.len() / 2);
-    let fade_out_n = ((PREVIEW_FADE_OUT.as_secs_f64() * sample_rate as f64 * channels as f64)
-        as usize)
+    let fade_out_n = ((PREVIEW_FADE_OUT.as_secs_f64()
+        * sample_rate.get() as f64
+        * channels.get() as f64) as usize)
         .min(samples.len() / 2);
     let mut first = samples.clone();
     for (k, s) in first.iter_mut().rev().take(fade_out_n).enumerate() {
         let g = k as f32 / fade_out_n.max(1) as f32;
-        *s = (*s as f32 * g) as i16;
+        *s *= g;
     }
     for (i, s) in samples.iter_mut().take(fade_in_n).enumerate() {
         let g = i as f32 / fade_in_n.max(1) as f32;
-        *s = (*s as f32 * g) as i16;
+        *s *= g;
     }
     for (k, s) in samples.iter_mut().rev().take(fade_out_n).enumerate() {
         let g = k as f32 / fade_out_n.max(1) as f32;
-        *s = (*s as f32 * g) as i16;
+        *s *= g;
     }
     Ok(PreviewBuf {
         first,
@@ -917,17 +916,18 @@ fn build_picker_mode_inner(
     let preview_spectrum = super::spectrum::SharedSpectrum::new();
     // One long-lived audio stream/handle for the whole picker run.
     // Reusing this across previews avoids the ~10-30 ms cold-open cost
-    // per chart switch. Sinks are still per-preview (Sink::stop drops
+    // per chart switch. Players are still per-preview (Player::stop drops
     // queued audio on switch).
     //
-    // The `OutputStream` has to outlive every sink we create against
-    // its handle — cpal drops the backing device when the Stream goes
-    // out of scope and subsequent `Sink::try_new` calls come back
-    // `NoDevice`. The `move` closure below only captures variables it
-    // references, so we stash the stream inside the closure scope via
-    // a dedicated binding that gets read once per frame.
-    let (preview_stream, preview_handle) = OutputStream::try_default()
+    // The device sink has to outlive every player we create against its
+    // mixer — cpal drops the backing device when the stream goes out of
+    // scope and players connected to the orphaned mixer go silent. The
+    // `move` closure below only captures variables it references, so we
+    // stash the stream inside the closure scope via a dedicated binding
+    // that gets read once per frame.
+    let preview_stream = DeviceSinkBuilder::open_default_sink()
         .map_err(|e| Error::Config(format!("preview: no output device: {e}")))?;
+    let preview_handle = preview_stream.mixer().clone();
     let mut preview: Option<PreviewPlayer> = None;
     let mut jackets = JacketCache::new();
     // HUD background plumbing — shader cache + image cache, same two
@@ -2138,7 +2138,7 @@ fn draw_overlay(
                                     art_rect,
                                     egui::CornerRadius::same(4),
                                     egui::Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80),
                                     ),
                                     egui::StrokeKind::Middle,
@@ -2373,7 +2373,7 @@ fn draw_overlay(
                         panel_rect,
                         egui::CornerRadius::same(5),
                         egui::Stroke::new(
-                            1.0,
+                            1.0_f32,
                             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 45),
                         ),
                         egui::StrokeKind::Middle,
@@ -2696,7 +2696,7 @@ fn draw_filter_overlay(
                         panel_rect,
                         egui::CornerRadius::same(5),
                         egui::Stroke::new(
-                            1.0,
+                            1.0_f32,
                             egui::Color32::from_rgba_unmultiplied(
                                 tile.accent.r(),
                                 tile.accent.g(),

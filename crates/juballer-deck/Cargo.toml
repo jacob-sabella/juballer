@@ -28,7 +28,7 @@ egui_extras = { version = "0.34", features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64.workspace = true
 
-sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 serde.workspace = true
@@ -55,10 +55,20 @@ tokio-util.workspace = true
 futures-util = { version = "0.3", features = ["sink"] }
 tempfile = "3"
 rand = "0.10"
-# Rhythm mode audio. Default features would pull in symphonia for mp3/aac/etc. which
-# adds ~40 crates; Phase 1 only supports ogg/vorbis sample charts so we trim the
-# transitive graph by picking features explicitly.
-rodio = { version = "0.19", default-features = false, features = ["vorbis", "wav"] }
+# Rhythm mode audio. Default features would pull in symphonia for mp3/aac/etc.
+# plus recording and dithering, which adds ~40 crates; we only support
+# ogg/vorbis sample charts so we trim the transitive graph by picking features
+# explicitly. `playback` is what pulls in cpal + `rodio::stream` — implicit
+# before 0.20, feature-gated since.
+rodio = { version = "0.22", default-features = false, features = [
+    "playback",
+    "vorbis",
+    "wav",
+    # Without this rodio `eprintln!`s on every device-sink drop — which for us
+    # is once per song end, picker exit and shutdown. Routes it to the
+    # subscriber we already install, at debug level.
+    "tracing",
+] }
 # Real-audio FFT for shader backgrounds. `realfft` wraps rustfft with a
 # half-spectrum output optimised for real input (half the buffer, same math).
 realfft = "3"
@@ -70,7 +80,7 @@ jpeg-decoder = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.29"
 
 [[bin]]
 name = "juballer-deck"

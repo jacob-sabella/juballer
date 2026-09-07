@@ -41,7 +41,7 @@ pub fn draw_card(
     painter.rect_stroke(
         rect,
         rounding,
-        egui::Stroke::new(1.0, theme.surface1),
+        egui::Stroke::new(1.0_f32, theme.surface1),
         egui::StrokeKind::Middle,
     );
 
@@ -81,7 +81,7 @@ pub fn draw_card(
         painter.hline(
             rect.min.x..=rect.max.x,
             divider_y,
-            egui::Stroke::new(1.0, theme.surface1),
+            egui::Stroke::new(1.0_f32, theme.surface1),
         );
         divider_y + HEADER_GAP
     } else {
