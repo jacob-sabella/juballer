@@ -69,7 +69,7 @@ impl Widget for ActionMiniWidget {
         painter.rect_stroke(
             tile,
             rounding,
-            egui::Stroke::new(1.0, theme.surface1),
+            egui::Stroke::new(1.0_f32, theme.surface1),
             egui::StrokeKind::Middle,
         );
 
@@ -79,7 +79,7 @@ impl Widget for ActionMiniWidget {
                 tile,
                 rounding,
                 egui::Stroke::new(
-                    1.5,
+                    1.5_f32,
                     egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 180),
                 ),
                 egui::StrokeKind::Middle,

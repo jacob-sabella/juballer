@@ -106,7 +106,7 @@ The rhythm pipeline lives entirely under
 
 ### From source
 
-Requires Rust 1.80+ (pinned in `rust-toolchain.toml`).
+Requires Rust 1.95+ (pinned in `rust-toolchain.toml`).
 
 ```bash
 cargo build --release -p juballer-deck

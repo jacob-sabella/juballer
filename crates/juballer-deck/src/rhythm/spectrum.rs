@@ -276,7 +276,7 @@ impl SharedSpectrum {
             .inner
             .snapshot_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if n % 120 == 0 {
+        if n.is_multiple_of(120) {
             let peak = out.iter().fold(0.0f32, |a, &b| a.max(b));
             let avg: f32 = out.iter().sum::<f32>() / NUM_BINS as f32;
             tracing::info!(
@@ -289,7 +289,7 @@ impl SharedSpectrum {
     }
 }
 
-/// rodio Source wrapper that mirrors i16 samples into [`SharedSpectrum`]
+/// rodio Source wrapper that mirrors f32 samples into [`SharedSpectrum`]
 /// as they pass through to the mixer.
 pub struct SampleTap<S> {
     inner: S,
@@ -305,10 +305,10 @@ pub struct SampleTap<S> {
 
 const SCRATCH_FLUSH: usize = 128;
 
-impl<S: Source<Item = i16>> SampleTap<S> {
+impl<S: Source> SampleTap<S> {
     pub fn new(inner: S, shared: SharedSpectrum) -> Self {
-        let channels = inner.channels().max(1);
-        let rate = inner.sample_rate();
+        let channels = inner.channels().get();
+        let rate = inner.sample_rate().get();
         shared.set_sample_rate(rate);
         Self {
             inner,
@@ -320,14 +320,14 @@ impl<S: Source<Item = i16>> SampleTap<S> {
     }
 }
 
-impl<S: Source<Item = i16>> Iterator for SampleTap<S> {
-    type Item = i16;
+impl<S: Source> Iterator for SampleTap<S> {
+    type Item = rodio::Sample;
 
-    fn next(&mut self) -> Option<i16> {
+    fn next(&mut self) -> Option<rodio::Sample> {
         let s = self.inner.next()?;
         // Grab channel 0 for the FFT; skip the rest.
         if self.ch_ix == 0 {
-            self.scratch.push((s as f32) / 32_768.0);
+            self.scratch.push(s);
             if self.scratch.len() >= SCRATCH_FLUSH {
                 self.shared.push_batch(&self.scratch);
                 self.scratch.clear();
@@ -338,14 +338,14 @@ impl<S: Source<Item = i16>> Iterator for SampleTap<S> {
     }
 }
 
-impl<S: Source<Item = i16>> Source for SampleTap<S> {
-    fn current_frame_len(&self) -> Option<usize> {
-        self.inner.current_frame_len()
+impl<S: Source> Source for SampleTap<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
     }
-    fn channels(&self) -> u16 {
+    fn channels(&self) -> rodio::ChannelCount {
         self.inner.channels()
     }
-    fn sample_rate(&self) -> u32 {
+    fn sample_rate(&self) -> rodio::SampleRate {
         self.inner.sample_rate()
     }
     fn total_duration(&self) -> Option<Duration> {

@@ -398,9 +398,9 @@ fn paint_tile(
     // 3. Border — nav gets the blue accent, toggle-on gets state color, action stays quiet.
     if is_bound {
         let (border_col, border_w) = match kind {
-            crate::action::ActionKind::Nav => (theme.accent_alt, 1.5),
-            crate::action::ActionKind::Toggle => (state_color32.unwrap_or(theme.surface1), 1.5),
-            crate::action::ActionKind::Action => (theme.surface1, 1.0),
+            crate::action::ActionKind::Nav => (theme.accent_alt, 1.5_f32),
+            crate::action::ActionKind::Toggle => (state_color32.unwrap_or(theme.surface1), 1.5_f32),
+            crate::action::ActionKind::Action => (theme.surface1, 1.0_f32),
         };
         painter.rect_stroke(
             tile_rect,
@@ -435,14 +435,14 @@ fn paint_tile(
     if is_bound
         && state.icon.is_none()
         && state.label.is_none()
-        && bound.map_or(true, |b| b.icon.is_none() && b.label.is_none())
+        && bound.is_none_or(|b| b.icon.is_none() && b.label.is_none())
     {
         let a = primary_accent;
         painter.rect_stroke(
             tile_rect.shrink(4.0),
             egui::CornerRadius::same(8),
             egui::Stroke::new(
-                1.0,
+                1.0_f32,
                 egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 70),
             ),
             egui::StrokeKind::Middle,
@@ -472,7 +472,7 @@ fn paint_tile(
                     ring_rect,
                     egui::CornerRadius::same((10.0 + ring_grow) as u8),
                     egui::Stroke::new(
-                        1.5,
+                        1.5_f32,
                         egui::Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), ring_alpha),
                     ),
                     egui::StrokeKind::Middle,
@@ -709,7 +709,7 @@ fn paint_nav_chevron(painter: &egui::Painter, rect: egui::Rect, color: egui::Col
     let pad = 10.0;
     let y = rect.center().y;
     let stroke_col = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 210);
-    let stroke = egui::Stroke::new(2.5, stroke_col);
+    let stroke = egui::Stroke::new(2.5_f32, stroke_col);
     if back {
         let x = rect.min.x + pad;
         painter.line_segment([egui::pos2(x + size, y - size), egui::pos2(x, y)], stroke);

@@ -198,7 +198,7 @@ impl Widget for NotificationToastWidget {
         painter.rect_stroke(
             toast_rect,
             egui::CornerRadius::same((CARD_RADIUS) as u8),
-            egui::Stroke::new(1.0, border_color),
+            egui::Stroke::new(1.0_f32, border_color),
             egui::StrokeKind::Middle,
         );
 

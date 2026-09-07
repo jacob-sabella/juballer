@@ -442,7 +442,7 @@ fn render_plot(
         let range = (max - min).max(f32::EPSILON);
         let step = rect.width() / (values.len() - 1) as f32;
         let stroke = egui::Stroke::new(
-            1.5,
+            1.5_f32,
             color
                 .and_then(parse_color)
                 .unwrap_or(egui::Color32::from_rgb(0x89, 0xb4, 0xfa)),

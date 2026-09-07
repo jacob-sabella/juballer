@@ -330,7 +330,7 @@ async fn ws_preview_action_publishes_to_deck_bus() {
     let url = format!("ws://{bound}/ws");
     let (mut ws, _resp) = tokio_tungstenite::connect_async(&url).await.unwrap();
     ws.send(TungMessage::Text(
-        r#"{"kind":"preview_action","action":"shell.run","args":{"cmd":"true"}}"#.to_string(),
+        r#"{"kind":"preview_action","action":"shell.run","args":{"cmd":"true"}}"#.into(),
     ))
     .await
     .unwrap();

@@ -30,9 +30,9 @@ impl WidgetBuildFromArgs for SysinfoWidget {
             .and_then(|v| v.as_integer())
             .map(|i| i.max(200) as u64)
             .unwrap_or(1000);
-        let specifics = RefreshKind::new()
-            .with_cpu(CpuRefreshKind::new().with_cpu_usage())
-            .with_memory(MemoryRefreshKind::new().with_ram());
+        let specifics = RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+            .with_memory(MemoryRefreshKind::nothing().with_ram());
         let sys = System::new_with_specifics(specifics);
         Ok(Self {
             interval: Duration::from_millis(interval_ms),

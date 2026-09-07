@@ -207,7 +207,7 @@ fn paint_sparkline(
         let y = rect.max.y - ((s - min) / range) * (rect.height() - 2.0) - 1.0;
         let p = egui::pos2(x, y);
         if let Some(prev_p) = prev {
-            painter.line_segment([prev_p, p], egui::Stroke::new(1.5, stroke_color));
+            painter.line_segment([prev_p, p], egui::Stroke::new(1.5_f32, stroke_color));
         }
         prev = Some(p);
     }
