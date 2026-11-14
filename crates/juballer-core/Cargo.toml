@@ -14,7 +14,7 @@ raw-input = ["dep:evdev", "dep:windows"]
 headless = []
 
 [dependencies]
-pollster = "0.4"
+pollster = "1.0"
 winit.workspace = true
 wgpu.workspace = true
 serde.workspace = true
