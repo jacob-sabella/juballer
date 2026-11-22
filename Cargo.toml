@@ -5,6 +5,7 @@ members = [
     "crates/juballer-egui",
     "crates/juballer-gestures",
     "crates/juballer-deck-protocol",
+    "crates/juballer-rhythm",
     "crates/juballer-deck",
 ]
 

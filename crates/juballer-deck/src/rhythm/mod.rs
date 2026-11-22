@@ -5,17 +5,16 @@
 //! judges player input. Runs alongside the regular deck app but bypasses the
 //! DeckApp widget/action pipeline — see [`play`].
 
+pub use juballer_rhythm::{chart, judge, notes, state};
+
 pub mod audio;
 pub mod background;
 pub mod calibrate;
-pub mod chart;
 pub mod chart_overrides;
 pub mod exit;
 pub mod favorites;
-pub mod judge;
 pub mod marker;
 pub mod mods_ui;
-pub mod notes;
 pub mod pagination;
 pub mod picker;
 pub mod picker_view;
@@ -24,7 +23,6 @@ pub mod scores;
 pub mod settings_ui;
 pub mod sfx;
 pub mod spectrum;
-pub mod state;
 pub mod textfx;
 pub mod tutorial;
 

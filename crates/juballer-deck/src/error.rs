@@ -25,3 +25,12 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<juballer_rhythm::Error> for Error {
+    fn from(e: juballer_rhythm::Error) -> Self {
+        match e {
+            juballer_rhythm::Error::Config(m) => Error::Config(m),
+            juballer_rhythm::Error::ConfigIo(e) => Error::ConfigIo(e),
+        }
+    }
+}

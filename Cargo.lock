@@ -2125,6 +2125,7 @@ dependencies = [
  "juballer-core",
  "juballer-deck-protocol",
  "juballer-egui",
+ "juballer-rhythm",
  "libc",
  "log",
  "notify",
@@ -2176,6 +2177,18 @@ name = "juballer-gestures"
 version = "0.0.5"
 dependencies = [
  "juballer-core",
+]
+
+[[package]]
+name = "juballer-rhythm"
+version = "0.0.5"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

@@ -228,7 +228,7 @@ fn find_sibling(parent: &Path, candidates: &[&str]) -> Option<PathBuf> {
 /// Resolve the optional `metadata.jacket` string to an absolute path under
 /// the chart's directory. Empty strings are treated as absent so a chart
 /// author can leave the key as `""` without producing a bogus path.
-pub(crate) fn resolve_jacket_path(parent: &Path, jacket: Option<&str>) -> Option<PathBuf> {
+pub fn resolve_jacket_path(parent: &Path, jacket: Option<&str>) -> Option<PathBuf> {
     // Explicit metadata wins.
     if let Some(raw) = jacket.map(str::trim).filter(|s| !s.is_empty()) {
         return Some(parent.join(raw));
