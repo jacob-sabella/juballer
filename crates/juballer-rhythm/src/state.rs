@@ -413,12 +413,12 @@ pub struct RenderSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chart::{BpmEntry, BpmSchedule, Chart};
+    use crate::chart::{BpmEntry, BpmSchedule, Chart, SymbolicTime};
 
     fn chart_from_notes(notes: Vec<Note>) -> Chart {
         let schedule = BpmSchedule::new(
             &[BpmEntry {
-                beat: 0,
+                beat: SymbolicTime::Ticks(0),
                 bpm: 120.0,
             }],
             240,

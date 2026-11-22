@@ -71,8 +71,14 @@ pub fn narration_at(music_ms: f64) -> &'static str {
 pub fn generate_tutorial_chart() -> Chart {
     let bpm = 120.0;
     let resolution: u32 = 240;
-    let schedule = BpmSchedule::new(&[BpmEntry { beat: 0, bpm }], resolution)
-        .expect("bpm > 0 for tutorial chart");
+    let schedule = BpmSchedule::new(
+        &[BpmEntry {
+            beat: crate::rhythm::chart::SymbolicTime::Ticks(0),
+            bpm,
+        }],
+        resolution,
+    )
+    .expect("bpm > 0 for tutorial chart");
 
     // Absolute hit times in ms, placed inside each phase window. We pick
     // values by hand rather than beat-grid math because the phases are not

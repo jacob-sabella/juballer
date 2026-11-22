@@ -22,8 +22,14 @@ use std::path::{Path, PathBuf};
 /// positive — the underlying [`BpmSchedule::new`] rejects zero/negative.
 pub fn generate_chart(bpm: f64, beats: usize, cell: (u8, u8)) -> Chart {
     let resolution: u32 = 240;
-    let schedule = BpmSchedule::new(&[BpmEntry { beat: 0, bpm }], resolution)
-        .expect("bpm > 0 for metronome chart");
+    let schedule = BpmSchedule::new(
+        &[BpmEntry {
+            beat: crate::rhythm::chart::SymbolicTime::Ticks(0),
+            bpm,
+        }],
+        resolution,
+    )
+    .expect("bpm > 0 for metronome chart");
     let (row, col) = cell;
     let mut notes = Vec::with_capacity(beats);
     for i in 0..beats {

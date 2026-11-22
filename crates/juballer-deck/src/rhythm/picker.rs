@@ -264,14 +264,9 @@ fn collect_charts(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) -> Result<()
 /// artist, first-BPM, and the difficulty key list for the grid).
 fn load_entry(path: &Path) -> Result<ChartEntry> {
     let bytes = std::fs::read(path)?;
-    let memon: super::chart::Memon = serde_json::from_slice(&bytes)
+    let memon = super::chart::Memon::parse(&bytes)
         .map_err(|e| Error::Config(format!("{}: {e}", path.display())))?;
-    if memon.version != "1.0.0" {
-        return Err(Error::Config(format!(
-            "unsupported version {}",
-            memon.version
-        )));
-    }
+    let title = super::chart::display_title(&memon, path);
     // Pick a difficulty to count notes from — prefer BSC if present, else
     // whichever sorts first.
     let diffs: Vec<String> = memon.data.keys().cloned().collect();
@@ -304,7 +299,7 @@ fn load_entry(path: &Path) -> Result<ChartEntry> {
                     .map(|b| b.bpm)
             })
         })
-        .unwrap_or(0.0);
+        .unwrap_or(120.0);
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let audio_path = parent.join(&memon.metadata.audio);
     let jacket_path = resolve_jacket_path(parent, memon.metadata.jacket.as_deref());
@@ -318,7 +313,7 @@ fn load_entry(path: &Path) -> Result<ChartEntry> {
         .find(|p| p.is_file());
     Ok(ChartEntry {
         path: path.to_path_buf(),
-        title: memon.metadata.title,
+        title,
         artist: memon.metadata.artist,
         bpm,
         note_count,

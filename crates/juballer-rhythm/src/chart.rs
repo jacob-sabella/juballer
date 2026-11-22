@@ -1,10 +1,9 @@
-//! memon v1.0.0 chart loader.
+//! memon chart loader: v1.0.0, plus v0.x and pre-semver files upgraded on read.
 //!
 //! Only the fields the rhythm game actually uses are materialised; everything
-//! else (hakus, etc.) is silently ignored. Fractional `t` values (the
-//! `[whole, frac_num, frac_den]` form) are resolved to
-//! `whole + frac_num / frac_den` ticks and converted to ms via the
-//! float-friendly [`BpmSchedule::tick_to_ms_float`] path.
+//! else (hakus, etc.) is silently ignored. Symbolic times are either an integer
+//! number of ticks or a `[whole, num, den]` mixed number of *beats*. Decimals
+//! may be JSON numbers or strings.
 
 use crate::{Error, Result};
 use indexmap::IndexMap;
@@ -75,14 +74,67 @@ impl Note {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Memon {
     pub version: String,
+    #[serde(default)]
     pub metadata: Metadata,
     #[serde(default)]
     pub timing: Option<Timing>,
     pub data: IndexMap<String, ChartData>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl Memon {
+    /// Parse a memon file of any supported version into the v1.0.0 shape.
+    pub fn parse(bytes: &[u8]) -> std::result::Result<Self, String> {
+        #[derive(Deserialize)]
+        struct Header {
+            #[serde(default)]
+            version: Option<String>,
+        }
+        let header: Header = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        match header.version.as_deref() {
+            Some("1.0.0") => serde_json::from_slice(bytes).map_err(|e| e.to_string()),
+            // No version key at all is the pre-semver format.
+            None | Some("0.1.0" | "0.2.0" | "0.3.0") => {
+                let root: serde_json::Value =
+                    serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+                serde_json::from_value(upgrade_v0(root)?).map_err(|e| e.to_string())
+            }
+            Some(v) => Err(format!(
+                "unsupported memon version '{v}', expected 1.0.0 or 0.x"
+            )),
+        }
+    }
+
+    /// Difficulty names in the spec's display order: BSC, ADV, EXT, then the
+    /// rest alphabetically.
+    pub fn ordered_difficulties(&self) -> Vec<&str> {
+        let rank = |d: &str| match d {
+            "BSC" => 0,
+            "ADV" => 1,
+            "EXT" => 2,
+            _ => 3,
+        };
+        let mut names: Vec<&str> = self.data.keys().map(String::as_str).collect();
+        names.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+        names
+    }
+
+    /// The BPM events that apply to `difficulty`, after timing fallback.
+    /// Empty means the schema default of 120 BPM.
+    pub fn bpms_for(&self, difficulty: &str) -> &[BpmEntry] {
+        self.data
+            .get(difficulty)
+            .and_then(|c| c.timing.as_ref())
+            .filter(|t| !t.bpms.is_empty())
+            .or(self.timing.as_ref())
+            .map(|t| t.bpms.as_slice())
+            .unwrap_or(&[])
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Metadata {
+    /// Song title. Optional in the spec; loaders fall back to the file name.
+    #[serde(default)]
     pub title: String,
     /// Artist credit. Many chart dumps lack this; default to empty so the
     /// loader still accepts them.
@@ -93,11 +145,12 @@ pub struct Metadata {
     /// silent (useful for chart review / practice).
     #[serde(default)]
     pub audio: String,
-    /// Optional per-chart song-preview hint (memon v1.0.0 spec field). When
-    /// present the chart picker uses it verbatim for its audio snippet;
-    /// otherwise the picker falls back to a heuristic (see
-    /// `picker::preview_window`). Both `start` and `duration` are seconds.
-    #[serde(default)]
+    /// Optional per-chart song-preview hint. When present the chart picker
+    /// uses it verbatim for its audio snippet; otherwise the picker falls back
+    /// to a heuristic (see `picker::preview_window`). Both `start` and
+    /// `duration` are seconds. The spec's other form, a path to a BMS-style
+    /// preview file, reads as `None`.
+    #[serde(default, deserialize_with = "de_preview")]
     pub preview: Option<Preview>,
     /// Optional album-art / jacket path relative to the memon file. Resolved
     /// to an absolute [`Chart::jacket_path`] by the loader. Absent or empty
@@ -110,28 +163,61 @@ pub struct Metadata {
 /// not mandate a default; we treat absence as "no hint, use heuristic".
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 pub struct Preview {
+    #[serde(deserialize_with = "de_decimal")]
     pub start: f64,
+    #[serde(deserialize_with = "de_decimal")]
     pub duration: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// Every key is optional: each one falls back separately from the chart's
+/// timing object to the root's, then to the schema default.
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Timing {
+    #[serde(default, deserialize_with = "de_opt_decimal")]
+    pub offset: Option<f64>,
     #[serde(default)]
-    pub offset: f64,
-    #[serde(default = "default_resolution")]
-    pub resolution: u32,
+    pub resolution: Option<u32>,
     #[serde(default)]
     pub bpms: Vec<BpmEntry>,
 }
 
-fn default_resolution() -> u32 {
-    240
+const DEFAULT_RESOLUTION: u32 = 240;
+const DEFAULT_BPM: f64 = 120.0;
+
+/// A memon time point or duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolicTime {
+    /// Ticks of the enclosing resolution.
+    Ticks(u64),
+    /// `whole + num / den` beats.
+    Mixed(u64, u64, u64),
+}
+
+impl SymbolicTime {
+    fn from_json(v: &serde_json::Value) -> Option<Self> {
+        match v {
+            serde_json::Value::Number(n) => n.as_u64().map(Self::Ticks),
+            serde_json::Value::Array(a) if a.len() == 3 => {
+                let (w, n, d) = (a[0].as_u64()?, a[1].as_u64()?, a[2].as_u64()?);
+                (d > 0).then_some(Self::Mixed(w, n, d))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn beats(self, resolution: u32) -> f64 {
+        match self {
+            Self::Ticks(t) => t as f64 / resolution as f64,
+            Self::Mixed(w, n, d) => w as f64 + n as f64 / d as f64,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BpmEntry {
-    #[serde(default)]
-    pub beat: i64,
+    #[serde(deserialize_with = "de_symbolic")]
+    pub beat: SymbolicTime,
+    #[serde(deserialize_with = "de_decimal")]
     pub bpm: f64,
 }
 
@@ -147,35 +233,199 @@ pub struct ChartData {
     pub notes: Vec<NoteRaw>,
 }
 
+impl ChartData {
+    /// The chart's level, whether stored as a number or a string.
+    pub fn level_value(&self) -> Option<f64> {
+        decimal(&self.level)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct NoteRaw {
     pub n: u8,
     pub t: serde_json::Value,
-    /// Length in ticks (long notes). Absent or 0 means a tap note.
+    /// Symbolic length (long notes). Absent or 0 means a tap note.
     #[serde(default)]
-    pub l: Option<i64>,
+    pub l: Option<serde_json::Value>,
     /// Arrow tail-position encoding (0..5) — visual only. Only the head
     /// cell + length matter for gameplay.
     #[serde(default)]
     pub p: Option<u8>,
 }
 
+// ── Lenient field readers ──────────────────────────────────────────────────
+
+fn decimal(v: &serde_json::Value) -> Option<f64> {
+    let x = match v {
+        serde_json::Value::Number(n) => n.as_f64()?,
+        serde_json::Value::String(s) => s.trim().parse().ok()?,
+        _ => return None,
+    };
+    x.is_finite().then_some(x)
+}
+
+fn de_decimal<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<f64, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    decimal(&v).ok_or_else(|| serde::de::Error::custom(format!("expected a decimal, got {v}")))
+}
+
+fn de_opt_decimal<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<f64>, D::Error> {
+    match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Null => Ok(None),
+        v => decimal(&v)
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom(format!("expected a decimal, got {v}"))),
+    }
+}
+
+fn de_symbolic<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<SymbolicTime, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    SymbolicTime::from_json(&v)
+        .ok_or_else(|| serde::de::Error::custom(format!("expected a symbolic time, got {v}")))
+}
+
+fn de_preview<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<Preview>, D::Error> {
+    match serde_json::Value::deserialize(d)? {
+        v @ serde_json::Value::Object(_) => serde_json::from_value(v)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        _ => Ok(None),
+    }
+}
+
+// ── v0.x upgrade ───────────────────────────────────────────────────────────
+
+/// A v0.x long-note `p` (12-notation: direction `p % 4`, distance `p / 4 + 1`)
+/// as 6-notation. `None` if the tail would fall off the grid.
+fn p12_to_p6(n: u64, p: u64) -> Option<u64> {
+    let dist = (p / 4 + 1) as i64;
+    let (dx, dy) = match p % 4 {
+        0 => (0, -dist),
+        1 => (dist, 0),
+        2 => (0, dist),
+        _ => (-dist, 0),
+    };
+    if p > 11 || n > 15 {
+        return None;
+    }
+    let (col, row) = ((n % 4) as i64, (n / 4) as i64);
+    let (tail_col, tail_row) = (col + dx, row + dy);
+    if !(0..4).contains(&tail_col) || !(0..4).contains(&tail_row) {
+        return None;
+    }
+    // Position among the three cells that aren't the head.
+    let slot = |tail: i64, head: i64| (if tail < head { tail } else { tail - 1 }) as u64;
+    Some(if dy == 0 {
+        slot(tail_col, col)
+    } else {
+        3 + slot(tail_row, row)
+    })
+}
+
+fn upgrade_v0_chart(chart: &mut serde_json::Value) {
+    let Some(notes) = chart.get_mut("notes").and_then(|n| n.as_array_mut()) else {
+        return;
+    };
+    for note in notes.iter_mut().filter_map(|n| n.as_object_mut()) {
+        if note.get("l").and_then(|l| l.as_u64()).unwrap_or(0) == 0 {
+            note.remove("l");
+            note.remove("p");
+            continue;
+        }
+        let n = note.get("n").and_then(|v| v.as_u64());
+        let p = note.get("p").and_then(|v| v.as_u64());
+        match n.zip(p).and_then(|(n, p)| p12_to_p6(n, p)) {
+            Some(p6) => {
+                note.insert("p".into(), p6.into());
+            }
+            None => {
+                note.remove("p");
+            }
+        }
+    }
+}
+
+/// Rewrite a v0.x or pre-semver file as v1.0.0. The old `offset` is the
+/// opposite of the new one, and old `p` values use 12-notation.
+fn upgrade_v0(mut root: serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    use serde_json::{Map, Value};
+    let obj = root.as_object_mut().ok_or("memon root is not an object")?;
+    let mut old = match obj.remove("metadata") {
+        Some(Value::Object(m)) => m,
+        _ => Map::new(),
+    };
+    let mut meta = Map::new();
+    for (from, to) in [
+        ("song title", "title"),
+        ("artist", "artist"),
+        ("music path", "audio"),
+        ("album cover path", "jacket"),
+        ("jacket path", "jacket"),
+    ] {
+        if let Some(v) = old.remove(from) {
+            meta.insert(to.into(), v);
+        }
+    }
+    if let Some(Value::Object(mut pv)) = old.remove("preview") {
+        let mut new = Map::new();
+        for (from, to) in [("position", "start"), ("length", "duration")] {
+            if let Some(v) = pv.remove(from) {
+                new.insert(to.into(), v);
+            }
+        }
+        meta.insert("preview".into(), Value::Object(new));
+    }
+
+    let mut timing = Map::new();
+    if let Some(offset) = old.get("offset").and_then(decimal) {
+        timing.insert("offset".into(), (-offset).into());
+    }
+    if let Some(bpm) = old.remove("BPM") {
+        timing.insert("bpms".into(), serde_json::json!([{"beat": 0, "bpm": bpm}]));
+    }
+
+    let mut data = match obj.remove("data") {
+        Some(Value::Object(m)) => m,
+        // Pre-semver: an array of charts, each naming its own difficulty.
+        Some(Value::Array(charts)) => {
+            let mut m = Map::new();
+            for mut c in charts {
+                let name = c
+                    .as_object_mut()
+                    .and_then(|o| o.remove("dif_name"))
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .ok_or("pre-semver chart has no dif_name")?;
+                m.insert(name, c);
+            }
+            m
+        }
+        _ => return Err("memon file has no data".to_string()),
+    };
+    data.values_mut().for_each(upgrade_v0_chart);
+    Ok(serde_json::json!({
+        "version": "1.0.0",
+        "metadata": meta,
+        "timing": timing,
+        "data": data,
+    }))
+}
+
 // ── Loader ─────────────────────────────────────────────────────────────────
 
-/// Parse `path` as memon v1.0.0 and produce a normalized [`Chart`] for `difficulty`.
-/// Returns `Err(Error::Config)` if the file can't be read, version mismatches, the
-/// difficulty is absent, timing info is missing, or no valid notes remain.
+/// Parse the memon file at `path` and produce a normalized [`Chart`] for `difficulty`.
+/// Returns `Err(Error::Config)` if the file can't be read, its version is
+/// unsupported, the difficulty is absent, or its timing is invalid.
 pub fn load(path: &Path, difficulty: &str) -> Result<Chart> {
     let bytes = std::fs::read(path)?;
-    let memon: Memon = serde_json::from_slice(&bytes)
+    let memon = Memon::parse(&bytes)
         .map_err(|e| Error::Config(format!("{}: memon parse: {e}", path.display())))?;
-    if memon.version != "1.0.0" {
-        return Err(Error::Config(format!(
-            "{}: unsupported memon version '{}', expected 1.0.0",
-            path.display(),
-            memon.version
-        )));
-    }
+    let title = display_title(&memon, path);
     let chart_data = memon.data.get(difficulty).ok_or_else(|| {
         let keys: Vec<&str> = memon.data.keys().map(String::as_str).collect();
         Error::Config(format!(
@@ -184,8 +434,7 @@ pub fn load(path: &Path, difficulty: &str) -> Result<Chart> {
         ))
     })?;
 
-    // Resolution + BPM-schedule + offset precedence per spec: chart-level
-    // timing wins over top-level.
+    // Each timing key falls back separately: chart, then root, then default.
     let (schedule, offset_s) = resolve_timing(&memon.timing, chart_data)?;
     let bpm = schedule.initial_bpm();
     let hit_times = build_notes(&chart_data.notes, &schedule, offset_s);
@@ -197,7 +446,7 @@ pub fn load(path: &Path, difficulty: &str) -> Result<Chart> {
     let mini_path = find_sibling(parent, &["mini.png", "mini.jpg", "thumb.png"]);
 
     Ok(Chart {
-        title: memon.metadata.title,
+        title,
         artist: memon.metadata.artist,
         audio_path,
         bpm,
@@ -209,6 +458,18 @@ pub fn load(path: &Path, difficulty: &str) -> Result<Chart> {
         banner_path,
         mini_path,
     })
+}
+
+/// The song title, or the file's name when the chart doesn't have one.
+pub fn display_title(memon: &Memon, path: &Path) -> String {
+    let title = memon.metadata.title.trim();
+    if title.is_empty() {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        title.to_string()
+    }
 }
 
 /// First existing file among `candidates` (evaluated in order) resolved
@@ -254,47 +515,38 @@ pub fn resolve_jacket_path(parent: &Path, jacket: Option<&str>) -> Option<PathBu
 }
 
 fn resolve_timing(top: &Option<Timing>, chart: &ChartData) -> Result<(BpmSchedule, f64)> {
-    // Per-difficulty timing wins ONLY if it actually carries bpms — some
-    // chart dumps include a present-but-empty `timing: {}` on every
-    // difficulty, and an `or(top)` chain that stopped at the empty Some
-    // would error out with "timing.bpms is empty". Fall through to the
-    // top-level timing whenever the per-difficulty bpms list is missing
-    // or empty.
-    let chart_has_bpms = chart
-        .timing
-        .as_ref()
-        .map(|t| !t.bpms.is_empty())
-        .unwrap_or(false);
-    let timing = if chart_has_bpms {
-        chart.timing.as_ref()
-    } else {
-        top.as_ref()
-    }
-    .ok_or_else(|| Error::Config("chart has no timing block (nor top-level)".to_string()))?;
-
-    if timing.bpms.is_empty() {
-        return Err(Error::Config("timing.bpms is empty".to_string()));
-    }
-
-    let resolution = chart
-        .timing
-        .as_ref()
+    // Spec: every key is searched separately, chart timing first, then root
+    // timing, then the schema default. A present-but-empty `bpms` counts as
+    // missing, since some chart dumps carry `timing: {}` on every difficulty.
+    let own = chart.timing.as_ref();
+    let root = top.as_ref();
+    let offset = own
+        .and_then(|t| t.offset)
+        .or(root.and_then(|t| t.offset))
+        .unwrap_or(0.0);
+    let timing_resolution = own
+        .and_then(|t| t.resolution)
+        .or(root.and_then(|t| t.resolution))
+        .unwrap_or(DEFAULT_RESOLUTION);
+    let default_bpms = [BpmEntry {
+        beat: SymbolicTime::Ticks(0),
+        bpm: DEFAULT_BPM,
+    }];
+    let bpms = own
         .filter(|t| !t.bpms.is_empty())
-        .map(|t| t.resolution)
-        .or(chart.resolution)
-        .unwrap_or(timing.resolution);
-
-    if resolution == 0 {
-        return Err(Error::Config("resolution must be > 0".to_string()));
-    }
-
-    let schedule = BpmSchedule::new(&timing.bpms, resolution)?;
-    Ok((schedule, timing.offset))
+        .or(root.filter(|t| !t.bpms.is_empty()))
+        .map(|t| t.bpms.as_slice())
+        .unwrap_or(&default_bpms);
+    // Notes count ticks in the chart's own resolution, BPM events in the
+    // timing object's.
+    let note_resolution = chart.resolution.unwrap_or(DEFAULT_RESOLUTION);
+    let schedule = BpmSchedule::with_resolutions(bpms, timing_resolution, note_resolution)?;
+    Ok((schedule, offset))
 }
 
-/// Pre-computed BPM segment table so ticks can be converted to ms in O(log n)
-/// (linear scan in practice — charts rarely have more than a handful of BPM
-/// changes). Each segment covers a half-open range `[start_tick, next_start)`.
+/// Pre-computed BPM segment table so beats can be converted to ms (linear scan
+/// in practice — charts rarely have more than a handful of BPM changes). Each
+/// segment covers a half-open range `[start_beat, next_start)`.
 #[derive(Debug, Clone)]
 pub struct BpmSchedule {
     segments: Vec<BpmSegment>,
@@ -303,67 +555,72 @@ pub struct BpmSchedule {
 
 #[derive(Debug, Clone, Copy)]
 struct BpmSegment {
-    start_tick: i64,
+    start_beat: f64,
     bpm: f64,
-    ms_per_tick: f64,
-    /// Cumulative music-time in ms at `start_tick` (before applying the
-    /// chart-level offset). Segment N's `ms_at_start` = segment N-1's
-    /// `ms_at_start + (start_tick_N - start_tick_{N-1}) * ms_per_tick_{N-1}`.
+    ms_per_beat: f64,
+    /// Cumulative music-time in ms at `start_beat` (before applying the
+    /// chart-level offset).
     ms_at_start: f64,
 }
 
 impl BpmSchedule {
-    /// Build a schedule from a memon `bpms` list. The list doesn't need to be
-    /// sorted — we sort by `beat` ascending here. If the earliest entry isn't
-    /// at beat 0, it's treated as if it were (the first BPM applies from the
-    /// song start).
+    /// A schedule whose BPM events and notes share one resolution.
     pub fn new(bpms: &[BpmEntry], resolution: u32) -> Result<Self> {
+        Self::with_resolutions(bpms, resolution, resolution)
+    }
+
+    /// Build a schedule from a memon `bpms` list, whose integer beats count
+    /// ticks of `timing_resolution`. `note_resolution` is what
+    /// [`Self::tick_to_ms`] counts in. The list doesn't need to be sorted. If
+    /// the earliest entry isn't at beat 0, its BPM applies from the song
+    /// start. When several entries share a beat, the last one wins.
+    pub fn with_resolutions(
+        bpms: &[BpmEntry],
+        timing_resolution: u32,
+        note_resolution: u32,
+    ) -> Result<Self> {
         if bpms.is_empty() {
             return Err(Error::Config("bpms is empty".to_string()));
         }
-        if resolution == 0 {
+        if timing_resolution == 0 || note_resolution == 0 {
             return Err(Error::Config("resolution must be > 0".to_string()));
         }
-        let mut sorted: Vec<BpmEntry> = bpms.to_vec();
-        sorted.sort_by_key(|b| b.beat);
-        // Force the first segment to start at beat 0 — otherwise ticks before
-        // the earliest BPM entry would have no applicable segment.
-        if sorted[0].beat != 0 {
-            let first = sorted[0].clone();
-            sorted.insert(
-                0,
-                BpmEntry {
-                    beat: 0,
-                    bpm: first.bpm,
-                },
-            );
-        }
-        for b in &sorted {
+        for b in bpms {
             if b.bpm <= 0.0 {
                 return Err(Error::Config(format!("bpm must be > 0 (got {})", b.bpm)));
             }
         }
-        let mut segments = Vec::with_capacity(sorted.len());
-        let mut ms_acc = 0.0;
-        let mut prev: Option<BpmSegment> = None;
-        for b in sorted {
-            let start_tick = b.beat * resolution as i64;
-            let ms_per_tick = (60_000.0 / b.bpm) / (resolution as f64);
-            if let Some(p) = prev {
-                ms_acc = p.ms_at_start + (start_tick - p.start_tick) as f64 * p.ms_per_tick;
+        let mut sorted: Vec<(f64, f64)> = bpms
+            .iter()
+            .map(|b| (b.beat.beats(timing_resolution), b.bpm))
+            .collect();
+        sorted.sort_by(|a, b| a.0.total_cmp(&b.0)); // stable: file order within a beat
+        let mut events: Vec<(f64, f64)> = Vec::with_capacity(sorted.len() + 1);
+        for e in sorted {
+            match events.last_mut() {
+                Some(last) if last.0 == e.0 => *last = e,
+                _ => events.push(e),
             }
-            let seg = BpmSegment {
-                start_tick,
-                bpm: b.bpm,
-                ms_per_tick,
-                ms_at_start: ms_acc,
-            };
-            segments.push(seg);
-            prev = Some(seg);
+        }
+        if events[0].0 != 0.0 {
+            events.insert(0, (0.0, events[0].1));
+        }
+        let mut segments: Vec<BpmSegment> = Vec::with_capacity(events.len());
+        for (start_beat, bpm) in events {
+            let ms_at_start = segments
+                .last()
+                .map(|p| p.ms_at_start + (start_beat - p.start_beat) * p.ms_per_beat)
+                .unwrap_or(0.0);
+            segments.push(BpmSegment {
+                start_beat,
+                bpm,
+                ms_per_beat: 60_000.0 / bpm,
+                ms_at_start,
+            });
         }
         Ok(Self {
             segments,
-            resolution,
+            resolution: note_resolution,
         })
     }
 
@@ -376,34 +633,28 @@ impl BpmSchedule {
         self.resolution
     }
 
-    /// Convert a tick count (from song start) to ms (before offset). Walks
-    /// backward through segments to find the active one for this tick. Ticks
-    /// before the first segment are treated as if they fell into segment 0.
-    pub fn tick_to_ms(&self, tick: i64) -> f64 {
+    /// Convert a beat position to ms (before offset).
+    pub fn beat_to_ms(&self, beat: f64) -> f64 {
         let seg = self
             .segments
             .iter()
-            .rfind(|s| s.start_tick <= tick)
+            .rfind(|s| s.start_beat <= beat)
             .unwrap_or(&self.segments[0]);
-        seg.ms_at_start + (tick - seg.start_tick) as f64 * seg.ms_per_tick
+        seg.ms_at_start + (beat - seg.start_beat) * seg.ms_per_beat
     }
 
-    /// Like [`Self::tick_to_ms`] but accepts a fractional tick position —
-    /// needed for memon's `[whole, frac_num, frac_den]` note-time form.
-    /// Segment lookup uses the floor of `tick` so sub-tick positions stay in
-    /// the same BPM segment as the whole part.
+    /// Convert a tick count (from song start) to ms (before offset).
+    pub fn tick_to_ms(&self, tick: i64) -> f64 {
+        self.tick_to_ms_float(tick as f64)
+    }
+
+    /// Like [`Self::tick_to_ms`] but accepts a fractional tick position.
     pub fn tick_to_ms_float(&self, tick: f64) -> f64 {
-        let floor_tick = tick.floor() as i64;
-        let seg = self
-            .segments
-            .iter()
-            .rfind(|s| s.start_tick <= floor_tick)
-            .unwrap_or(&self.segments[0]);
-        seg.ms_at_start + (tick - seg.start_tick as f64) * seg.ms_per_tick
+        self.beat_to_ms(tick / self.resolution as f64)
     }
 
     /// BPM active at music-time `ms` (pre-offset; segment boundaries are
-    /// stored relative to tick 0). Segments are half-open `[start, next_start)`
+    /// stored relative to beat 0). Segments are half-open `[start, next_start)`
     /// — a query exactly on a boundary returns the *later* segment's BPM.
     /// Times before the first segment fall back to the initial BPM.
     pub fn bpm_at(&self, ms: f64) -> f64 {
@@ -413,50 +664,6 @@ impl BpmSchedule {
             .rfind(|s| s.ms_at_start <= ms)
             .unwrap_or(&self.segments[0]);
         seg.bpm
-    }
-}
-
-/// Resolve memon's `t` field to `(tick_as_f64, floor_tick_as_i64)`. Returns
-/// `None` (after a `warn!`) for malformed values so the caller can skip the
-/// note. Accepts both the integer form (`t: 480`) and the fractional form
-/// (`t: [whole, frac_num, frac_den]` → `whole + frac_num / frac_den`).
-fn parse_note_time(t: &serde_json::Value, n: u8) -> Option<(f64, i64)> {
-    match t {
-        serde_json::Value::Number(num) => match num.as_i64() {
-            Some(v) => Some((v as f64, v)),
-            None => {
-                tracing::warn!(
-                    target: "juballer::rhythm",
-                    "note.t non-integer number at n={n}; skipping"
-                );
-                None
-            }
-        },
-        serde_json::Value::Array(arr) if arr.len() == 3 => {
-            let (w, frac_n, frac_d) = (arr[0].as_i64(), arr[1].as_i64(), arr[2].as_i64());
-            match (w, frac_n, frac_d) {
-                // Standard memon: frac_n ≥ 0 and frac_d > 0. Negative frac_n is
-                // out-of-spec (every example in memon v1.0.0 uses non-negative).
-                (Some(w), Some(fn_), Some(fd)) if fd > 0 && fn_ >= 0 => {
-                    let tick_f = w as f64 + fn_ as f64 / fd as f64;
-                    Some((tick_f, tick_f.floor() as i64))
-                }
-                _ => {
-                    tracing::warn!(
-                        target: "juballer::rhythm",
-                        "note.t fractional form invalid at n={n} (got {t}); skipping"
-                    );
-                    None
-                }
-            }
-        }
-        _ => {
-            tracing::warn!(
-                target: "juballer::rhythm",
-                "note.t unsupported type at n={n}; skipping"
-            );
-            None
-        }
     }
 }
 
@@ -494,6 +701,7 @@ fn resolve_tail(row: u8, col: u8, p: Option<u8>) -> (u8, u8) {
 
 fn build_notes(raw: &[NoteRaw], schedule: &BpmSchedule, offset_s: f64) -> Vec<Note> {
     let offset_ms = offset_s * 1000.0;
+    let resolution = schedule.resolution();
     let mut out = Vec::with_capacity(raw.len());
     for nr in raw {
         if nr.n >= 16 {
@@ -504,20 +712,27 @@ fn build_notes(raw: &[NoteRaw], schedule: &BpmSchedule, offset_s: f64) -> Vec<No
             );
             continue;
         }
-        let Some((t_tick_f, t_tick_floor)) = parse_note_time(&nr.t, nr.n) else {
+        let Some(start) = SymbolicTime::from_json(&nr.t) else {
+            tracing::warn!(
+                target: "juballer::rhythm",
+                "note.t invalid at n={} (got {}); skipping",
+                nr.n,
+                nr.t
+            );
             continue;
         };
-        let hit_ms = schedule.tick_to_ms_float(t_tick_f);
+        let start_beat = start.beats(resolution);
+        let hit_ms = schedule.beat_to_ms(start_beat);
         let hit_time_ms = offset_ms + hit_ms;
-        // Length of a long note must be measured across whatever BPM segments
-        // it spans — take the end-tick's ms minus the start-tick's ms rather
-        // than a single ms_per_tick multiplication. `l` is always integer in
-        // memon, so we anchor the end at floor(t) + l using the integer path.
-        let length_ms = match nr.l {
-            Some(l) if l > 0 => {
-                schedule.tick_to_ms(t_tick_floor + l) - schedule.tick_to_ms(t_tick_floor)
-            }
-            _ => 0.0,
+        // A long note can span BPM changes, so measure it as end minus start.
+        let length_beats =
+            nr.l.as_ref()
+                .and_then(SymbolicTime::from_json)
+                .map_or(0.0, |l| l.beats(resolution));
+        let length_ms = if length_beats > 0.0 {
+            schedule.beat_to_ms(start_beat + length_beats) - hit_ms
+        } else {
+            0.0
         };
         let row = nr.n / 4;
         let col = nr.n % 4;
@@ -539,7 +754,7 @@ fn build_notes(raw: &[NoteRaw], schedule: &BpmSchedule, offset_s: f64) -> Vec<No
         });
     }
     // Stable sort by time so the scheduler always sees notes in ascending order.
-    out.sort_by(|a, b| a.hit_time_ms.partial_cmp(&b.hit_time_ms).unwrap());
+    out.sort_by(|a, b| a.hit_time_ms.total_cmp(&b.hit_time_ms));
     out
 }
 
@@ -591,19 +806,18 @@ mod tests {
 
     #[test]
     fn fractional_tick_resolves_correctly() {
-        // 120 BPM, resolution 240 → ms_per_tick = 500/240 ≈ 2.0833…
-        // t = [480, 1, 2] → tick = 480.5 → ms ≈ 480.5 * 500/240 ≈ 1001.04166…
+        // The array form counts beats: [2, 1, 2] is 2.5 beats, 1250 ms at 120 BPM.
         let body = r#"{
             "version": "1.0.0",
             "metadata": {"title": "T", "artist": "A", "audio": "a.ogg"},
             "timing": {"offset": 0, "resolution": 240, "bpms": [{"beat": 0, "bpm": 120}]},
-            "data": {"BSC": {"level": 1, "notes": [{"n": 0, "t": [480, 1, 2]}]}}
+            "data": {"BSC": {"level": 1, "notes": [{"n": 0, "t": [2, 1, 2]}]}}
         }"#;
         let tmp = tempfile::tempdir().unwrap();
         let path = write(&tmp, "a.memon", body);
         let chart = load(&path, "BSC").unwrap();
         assert_eq!(chart.notes.len(), 1);
-        let expected = 480.5 * (500.0 / 240.0);
+        let expected = 1250.0;
         assert!(
             (chart.notes[0].hit_time_ms - expected).abs() < 1e-6,
             "got {}, expected {expected}",
@@ -636,7 +850,7 @@ mod tests {
     #[test]
     fn rejects_wrong_version() {
         let body =
-            r#"{"version":"0.3.0","metadata":{"title":"t","artist":"a","audio":"x"},"data":{}}"#;
+            r#"{"version":"2.0.0","metadata":{"title":"t","artist":"a","audio":"x"},"data":{}}"#;
         let tmp = tempfile::tempdir().unwrap();
         let path = write(&tmp, "a.memon", body);
         let err = load(&path, "BSC").unwrap_err();
@@ -711,7 +925,7 @@ mod tests {
             "timing": {
                 "offset": 0,
                 "resolution": 240,
-                "bpms": [{"beat": 0, "bpm": 120}, {"beat": 4, "bpm": 240}]
+                "bpms": [{"beat": 0, "bpm": 120}, {"beat": [4, 0, 1], "bpm": 240}]
             },
             "data": {"BSC": {"level": 1, "notes": [
                 {"n": 0, "t": 0},
@@ -740,7 +954,7 @@ mod tests {
             "timing": {
                 "offset": 0,
                 "resolution": 240,
-                "bpms": [{"beat": 0, "bpm": 120}, {"beat": 4, "bpm": 240}]
+                "bpms": [{"beat": 0, "bpm": 120}, {"beat": [4, 0, 1], "bpm": 240}]
             },
             "data": {"BSC": {"level": 1, "notes": [
                 {"n": 0, "t": 720, "l": 720}
@@ -764,11 +978,11 @@ mod tests {
         // Second segment runs at 250 BPM from beat 4 onward.
         let bpms = vec![
             BpmEntry {
-                beat: 0,
+                beat: SymbolicTime::Ticks(0),
                 bpm: 125.0,
             },
             BpmEntry {
-                beat: 4,
+                beat: SymbolicTime::Mixed(4, 0, 1),
                 bpm: 250.0,
             },
         ];
@@ -962,5 +1176,161 @@ mod tests {
         let chart = load(&path, "BSC").unwrap();
         // 120 BPM => beat = 500ms. tick 240 = 1 beat = 500ms. (Not 1000ms which would be 60 BPM.)
         assert!((chart.notes[0].hit_time_ms - 500.0).abs() < 1e-6);
+    }
+
+    fn load_body(body: &str, diff: &str) -> Chart {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write(&tmp, "song.memon", body);
+        load(&path, diff).unwrap()
+    }
+
+    #[test]
+    fn decimals_may_be_strings() {
+        let c = load_body(
+            r#"{"version":"1.0.0",
+                "metadata":{"title":"t","preview":{"start":"56.7","duration":"22.7"}},
+                "timing":{"offset":"0.031","bpms":[{"beat":0,"bpm":"130.000"}]},
+                "data":{"EXT":{"level":"10.8","notes":[{"n":0,"t":240}]}}}"#,
+            "EXT",
+        );
+        assert!((c.bpm - 130.0).abs() < 1e-9);
+        assert!((c.offset_ms - 31.0).abs() < 1e-9);
+        assert_eq!(c.preview.unwrap().start, 56.7);
+        assert!((c.notes[0].hit_time_ms - (31.0 + 60_000.0 / 130.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn metadata_timing_and_title_are_optional() {
+        let c = load_body(
+            r#"{"version":"1.0.0","data":{"BSC":{"notes":[{"n":0,"t":240}]}}}"#,
+            "BSC",
+        );
+        assert_eq!(c.title, "song");
+        assert_eq!(c.bpm, 120.0);
+        assert!((c.notes[0].hit_time_ms - 500.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn preview_path_string_is_no_window() {
+        let c = load_body(
+            r#"{"version":"1.0.0","metadata":{"preview":"preview.ogg"},
+                "data":{"BSC":{"notes":[]}}}"#,
+            "BSC",
+        );
+        assert!(c.preview.is_none());
+    }
+
+    #[test]
+    fn timing_falls_back_key_by_key() {
+        // The spec's own example: BSC takes only its bpms from its timing.
+        let body = r#"{"version":"1.0.0","timing":{"offset":0.84},"data":{
+            "BSC":{"timing":{"bpms":[{"beat":0,"bpm":200}]},"notes":[]},
+            "ADV":{"timing":{"offset":0.31,"bpms":[{"beat":0,"bpm":100}]},"notes":[]}}}"#;
+        let bsc = load_body(body, "BSC");
+        assert_eq!((bsc.bpm, bsc.offset_ms), (200.0, 840.0));
+        let adv = load_body(body, "ADV");
+        assert_eq!((adv.bpm, adv.offset_ms), (100.0, 310.0));
+    }
+
+    #[test]
+    fn integer_bpm_beat_counts_timing_ticks() {
+        // Tick 480 at timing resolution 120 is beat 4; notes use their own 240.
+        let c = load_body(
+            r#"{"version":"1.0.0",
+                "timing":{"resolution":120,"bpms":[{"beat":0,"bpm":120},{"beat":480,"bpm":240}]},
+                "data":{"BSC":{"notes":[{"n":0,"t":960},{"n":1,"t":1200}]}}}"#,
+            "BSC",
+        );
+        assert!((c.notes[0].hit_time_ms - 2000.0).abs() < 1e-6);
+        assert!((c.notes[1].hit_time_ms - 2250.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn duplicate_bpm_keeps_the_last() {
+        let c = load_body(
+            r#"{"version":"1.0.0","timing":{"bpms":[{"beat":0,"bpm":120},{"beat":0,"bpm":124}]},
+                "data":{"BSC":{"notes":[]}}}"#,
+            "BSC",
+        );
+        assert_eq!(c.bpm, 124.0);
+    }
+
+    #[test]
+    fn long_note_length_may_be_mixed_beats() {
+        let c = load_body(
+            r#"{"version":"1.0.0","data":{"BSC":{"notes":[
+                {"n":5,"t":[1,0,1],"l":[1,1,2],"p":2}]}}}"#,
+            "BSC",
+        );
+        assert!((c.notes[0].hit_time_ms - 500.0).abs() < 1e-6);
+        assert!((c.notes[0].length_ms - 750.0).abs() < 1e-6);
+        assert_eq!((c.notes[0].tail_row, c.notes[0].tail_col), (1, 3));
+    }
+
+    #[test]
+    fn p12_converts_to_p6() {
+        // Head n=5 (row 1, col 1). Up 1 → row 0 → p6 3; right 2 → col 3 → p6 2;
+        // down 2 → row 3 → p6 5; left 1 → col 0 → p6 0.
+        assert_eq!(p12_to_p6(5, 0), Some(3));
+        assert_eq!(p12_to_p6(5, 5), Some(2));
+        assert_eq!(p12_to_p6(5, 6), Some(5));
+        assert_eq!(p12_to_p6(5, 3), Some(0));
+        // Off the grid, or not a 12-notation value.
+        assert_eq!(p12_to_p6(0, 0), None);
+        assert_eq!(p12_to_p6(5, 12), None);
+    }
+
+    #[test]
+    fn v0_file_upgrades() {
+        let c = load_body(
+            r#"{"version":"0.2.0",
+                "metadata":{"song title":"Old","artist":"a","music path":"m.ogg",
+                    "album cover path":"j.png","BPM":120,"offset":-0.25,
+                    "preview":{"position":10,"length":5}},
+                "data":{"EXT":{"level":10,"resolution":240,"notes":[
+                    {"n":0,"t":0,"l":0,"p":0},
+                    {"n":5,"t":240,"l":240,"p":5}]}}}"#,
+            "EXT",
+        );
+        assert_eq!(c.title, "Old");
+        assert!(c.audio_path.ends_with("m.ogg"));
+        assert!(c.jacket_path.unwrap().ends_with("j.png"));
+        assert_eq!(
+            c.preview,
+            Some(Preview {
+                start: 10.0,
+                duration: 5.0
+            })
+        );
+        // The old offset is the opposite of the new one.
+        assert_eq!(c.offset_ms, 250.0);
+        assert!(!c.notes[0].is_long());
+        assert!((c.notes[1].hit_time_ms - 750.0).abs() < 1e-6);
+        assert_eq!((c.notes[1].tail_row, c.notes[1].tail_col), (1, 3));
+    }
+
+    #[test]
+    fn pre_semver_chart_array_upgrades() {
+        let c = load_body(
+            r#"{"metadata":{"song title":"Older","artist":"a","BPM":120,"offset":0},
+                "data":[{"dif_name":"ADV","level":5,"resolution":240,
+                    "notes":[{"n":1,"t":240,"l":0,"p":0}]}]}"#,
+            "ADV",
+        );
+        assert_eq!(c.title, "Older");
+        assert_eq!(c.notes.len(), 1);
+    }
+
+    #[test]
+    fn difficulties_sort_in_spec_order() {
+        let m = Memon::parse(
+            br#"{"version":"1.0.0","data":{"Zed":{"notes":[]},"EXT":{"notes":[]},
+                "Alt":{"notes":[]},"BSC":{"notes":[]},"ADV":{"notes":[]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.ordered_difficulties(),
+            ["BSC", "ADV", "EXT", "Alt", "Zed"]
+        );
     }
 }
